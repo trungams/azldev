@@ -548,6 +548,11 @@ func GetPackageNameFromSectionHeader(tokens []string) string {
 		token := tokens[index]
 
 		switch {
+		case token == "--":
+			// Trigger terminator: in %trigger* sections, `--` separates the
+			// owning sub-package from the trigger condition. Everything after
+			// `--` is the trigger condition, not the package name.
+			index = len(tokens)
 		case strings.HasPrefix(token, "-"):
 			switch token {
 			case "-n":
@@ -561,6 +566,8 @@ func GetPackageNameFromSectionHeader(tokens []string) string {
 			case "-p":
 				index += 2
 			case "-l":
+				index += 2
+			case "-P":
 				index += 2
 			case "-q":
 				index++
