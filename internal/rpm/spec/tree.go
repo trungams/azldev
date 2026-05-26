@@ -1,0 +1,922 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+package spec
+
+import (
+	"fmt"
+	"strings"
+)
+
+// blockKind classifies what a [block] represents in the spec tree.
+type blockKind int
+
+const (
+	// rootBlock is the top-level container for the entire spec.
+	rootBlock blockKind = iota
+	// sectionBlock is a named section (e.g., %build, %package -n foo).
+	// The implicit preamble (before any section header) is also a [sectionBlock]
+	// with an empty [block.Name].
+	sectionBlock
+	// conditionalBlock is a %if/%endif block. May wrap sections (at top level)
+	// or appear as content inside a section.
+	conditionalBlock
+	// textBlock is a contiguous run of raw text lines (leaf node).
+	textBlock
+	// macroDefBlock is a %define/%global directive, optionally spanning
+	// multiple lines via backslash continuation.
+	macroDefBlock
+)
+
+// block is a recursive node in the spec's structural tree.
+//
+// The tree is built by [parseTree] and serialized back to lines by [serializeTree].
+// Operations find and manipulate blocks, then serialize to update [Spec.rawLines].
+type block struct {
+	// Kind classifies this block.
+	Kind blockKind
+	// Header is the opening line: section header, conditional directive, or macro
+	// definition line. Empty for [rootBlock] and [textBlock].
+	Header string
+	// Name is the section keyword (e.g., "%build") or macro name (e.g., "buildflags").
+	// Empty for [rootBlock], [conditionalBlock], and [textBlock].
+	Name string
+	// Package is the sub-package name for section blocks (e.g., "devel", "foo").
+	// Empty for sections that target the main package.
+	Package string
+	// Endif is the %endif line text for [conditionalBlock] nodes.
+	Endif string
+	// Lines holds raw text for [textBlock] and [macroDefBlock] leaf nodes
+	// (including continuation lines for multi-line macros).
+	Lines []string
+	// Children holds nested blocks. For [sectionBlock], these are the section's
+	// content. For [conditionalBlock], these are the "then" branch. For [rootBlock],
+	// these are top-level sections and conditional wrappers.
+	Children []*block
+	// Else holds the "else" branch blocks for [conditionalBlock] nodes.
+	// nil when there is no %else/%elif branch.
+	Else []*block
+	// ElseDirective is the %else/%elif directive line, if present.
+	ElseDirective string
+}
+
+// parseTree parses raw spec lines into a [block] tree.
+//
+// The parser runs in two passes:
+//  1. Collect conditional pairs (%if/%endif) and section header positions.
+//  2. Build the tree, classifying each conditional as a wrapper (spans sections)
+//     or content block (fully inside a section) based on whether its body contains
+//     section headers.
+//
+// Line continuations (backslash at end of line) are respected: continuation bodies
+// are never interpreted as section headers or conditional directives.
+func parseTree(rawLines []string) (*block, error) {
+	pairs, err := collectConditionalPairs(rawLines)
+	if err != nil {
+		return nil, fmt.Errorf("parsing conditional structure:\n%w", err)
+	}
+
+	pairByIf := make(map[int]conditionalPair, len(pairs))
+	for _, p := range pairs {
+		pairByIf[p.ifLine] = p
+	}
+
+	sectionHeaders := findSectionHeaderLines(rawLines)
+
+	sectionHeaderSet := make(map[int]bool, len(sectionHeaders))
+	for _, h := range sectionHeaders {
+		sectionHeaderSet[h] = true
+	}
+
+	root := &block{Kind: rootBlock}
+
+	_, err = buildBlockChildren(rawLines, 0, len(rawLines), pairByIf, sectionHeaderSet, root, true)
+	if err != nil {
+		return nil, fmt.Errorf("building spec tree:\n%w", err)
+	}
+
+	// Wrap leading non-section children (preamble content) into an implicit
+	// preamble sectionBlock with empty Name, matching how Visit treats lines
+	// before the first section header. This allows findSectionBlock(root, "", "")
+	// to locate the preamble.
+	wrapPreamble(root)
+
+	return root, nil
+}
+
+// wrapPreamble wraps the leading non-section children of root into a preamble
+// [sectionBlock] with empty Name and Package. If the root already starts with
+// a [sectionBlock], no wrapping is needed.
+func wrapPreamble(root *block) {
+	// Find the index of the first sectionBlock or section-wrapping conditionalBlock.
+	firstSectionIdx := -1
+
+	for i, child := range root.Children {
+		if child.Kind == sectionBlock {
+			firstSectionIdx = i
+
+			break
+		}
+
+		if child.Kind == conditionalBlock && containsSectionBlocks(child) {
+			firstSectionIdx = i
+
+			break
+		}
+	}
+
+	// If everything is preamble (no sections) or nothing precedes the first section,
+	// still wrap in a preamble block for uniform access.
+	preambleEnd := firstSectionIdx
+	if preambleEnd < 0 {
+		preambleEnd = len(root.Children)
+	}
+
+	if preambleEnd == 0 {
+		// Nothing to wrap, but insert an empty preamble for uniform lookup.
+		preamble := &block{Kind: sectionBlock, Name: "", Package: ""}
+		root.Children = append([]*block{preamble}, root.Children...)
+
+		return
+	}
+
+	preamble := &block{
+		Kind:     sectionBlock,
+		Name:     "",
+		Package:  "",
+		Children: root.Children[:preambleEnd],
+	}
+
+	root.Children = append([]*block{preamble}, root.Children[preambleEnd:]...)
+}
+
+// containsSectionBlocks checks if a block (typically a conditionalBlock) contains
+// any sectionBlock children in any branch, recursing through %elif chains.
+func containsSectionBlocks(block *block) bool {
+	for _, child := range block.Children {
+		if child.Kind == sectionBlock {
+			return true
+		}
+
+		if child.Kind == conditionalBlock && containsSectionBlocks(child) {
+			return true
+		}
+	}
+
+	for _, child := range block.Else {
+		if child.Kind == sectionBlock {
+			return true
+		}
+
+		if child.Kind == conditionalBlock && containsSectionBlocks(child) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// findSectionHeaderLines returns the 0-indexed line numbers of all section headers,
+// respecting line continuations (backslash-terminated lines suppress the next line).
+func findSectionHeaderLines(rawLines []string) []int {
+	var headers []int
+
+	inCont := false
+
+	for i, line := range rawLines {
+		if inCont {
+			inCont = strings.HasSuffix(line, "\\")
+
+			continue
+		}
+
+		if isSectionHeaderLine(line) {
+			headers = append(headers, i)
+		}
+
+		inCont = strings.HasSuffix(line, "\\")
+	}
+
+	return headers
+}
+
+// isSectionHeaderLine returns true if the line starts a new RPM spec section.
+func isSectionHeaderLine(rawLine string) bool {
+	tokens := strings.Fields(strings.TrimSpace(rawLine))
+	if len(tokens) == 0 {
+		return false
+	}
+
+	_, known := sectionTypesByName[strings.ToLower(tokens[0])]
+
+	return known
+}
+
+// hasSectionHeaderInRange checks whether any line in [start, end) is a section header.
+func hasSectionHeaderInRange(start, end int, sectionHeaderSet map[int]bool) bool {
+	for lineNum := start; lineNum < end; lineNum++ {
+		if sectionHeaderSet[lineNum] {
+			return true
+		}
+	}
+
+	return false
+}
+
+// buildBlockChildren parses lines in [start, end) and appends resulting blocks
+// to parent.Children. topLevel indicates whether sections can appear (true at
+// root level and inside conditional wrappers).
+//
+//nolint:funlen,cyclop // Recursive parser with multiple block types.
+func buildBlockChildren(
+	rawLines []string,
+	start, end int,
+	pairByIf map[int]conditionalPair,
+	sectionHeaderSet map[int]bool,
+	parent *block,
+	topLevel bool,
+) (int, error) {
+	i := start
+	inCont := false
+
+	var textBuf []string
+	flushText := func() {
+		if len(textBuf) > 0 {
+			parent.Children = append(parent.Children, &block{
+				Kind:  textBlock,
+				Lines: textBuf,
+			})
+
+			textBuf = nil
+		}
+	}
+
+	for i < end {
+		line := rawLines[i]
+
+		if inCont {
+			textBuf = append(textBuf, line)
+			inCont = strings.HasSuffix(line, "\\")
+			i++
+
+			continue
+		}
+
+		// Section headers (only at top level).
+		if topLevel && sectionHeaderSet[i] {
+			flushText()
+
+			name, pkg := getSectionNameAndPackageFromHeader(line)
+			sectionBlock := &block{
+				Kind:    sectionBlock,
+				Header:  line,
+				Name:    name,
+				Package: pkg,
+			}
+
+			sectionEnd := findTreeSectionEnd(i+1, end, pairByIf, sectionHeaderSet)
+
+			_, err := buildBlockChildren(rawLines, i+1, sectionEnd, pairByIf, sectionHeaderSet, sectionBlock, false)
+			if err != nil {
+				return i, err
+			}
+
+			parent.Children = append(parent.Children, sectionBlock)
+			i = sectionEnd
+
+			continue
+		}
+
+		// Conditional directives.
+		if conditionalDepthChange(line) == 1 {
+			flushText()
+
+			pair, ok := pairByIf[i]
+			if !ok {
+				return i, fmt.Errorf("%%if at line %d has no matching pair", i+1)
+			}
+
+			condBlock := &block{
+				Kind:   conditionalBlock,
+				Header: line,
+				Endif:  rawLines[pair.endifLine],
+			}
+
+			bodyStart := i + 1
+			bodyEnd := pair.endifLine
+
+			elseLine := findElseDirectiveLine(rawLines, bodyStart, bodyEnd)
+
+			thenEnd := bodyEnd
+			if elseLine >= 0 {
+				thenEnd = elseLine
+			}
+
+			isWrapper := hasSectionHeaderInRange(bodyStart, bodyEnd, sectionHeaderSet)
+
+			if err := buildConditionalBranches(
+				rawLines, bodyStart, thenEnd, elseLine, bodyEnd,
+				pairByIf, sectionHeaderSet, condBlock, isWrapper,
+			); err != nil {
+				return i, err
+			}
+
+			parent.Children = append(parent.Children, condBlock)
+			i = pair.endifLine + 1
+
+			continue
+		}
+
+		// Macro definitions.
+		if name, ok := isMacroDefLine(line); ok {
+			flushText()
+
+			macroBlock := &block{
+				Kind:   macroDefBlock,
+				Header: line,
+				Name:   name,
+				Lines:  []string{line},
+			}
+
+			if strings.HasSuffix(line, "\\") {
+				inCont = true
+				i++
+
+				for i < end {
+					macroBlock.Lines = append(macroBlock.Lines, rawLines[i])
+
+					if !strings.HasSuffix(rawLines[i], "\\") {
+						inCont = false
+						i++
+
+						break
+					}
+
+					i++
+				}
+			} else {
+				i++
+			}
+
+			parent.Children = append(parent.Children, macroBlock)
+
+			continue
+		}
+
+		// Plain text line.
+		textBuf = append(textBuf, line)
+		inCont = strings.HasSuffix(line, "\\")
+		i++
+	}
+
+	flushText()
+
+	return i, nil
+}
+
+// buildConditionalBranches parses the then and optional else/elif branches of a
+// conditional block. For %elif chains, the else branch contains a single nested
+// [conditionalBlock] whose Header is the %elif directive, forming a linked list.
+func buildConditionalBranches(
+	rawLines []string,
+	bodyStart, thenEnd, elseLine, bodyEnd int,
+	pairByIf map[int]conditionalPair,
+	sectionHeaderSet map[int]bool,
+	condBlock *block,
+	isWrapper bool,
+) error {
+	_, err := buildBlockChildren(rawLines, bodyStart, thenEnd, pairByIf, sectionHeaderSet, condBlock, isWrapper)
+	if err != nil {
+		return err
+	}
+
+	if elseLine < 0 {
+		return nil
+	}
+
+	if isElifDirective(rawLines[elseLine]) {
+		// %elif: create a nested conditionalBlock forming a linked list.
+		// The inner block has no Endif — only the outermost block owns %endif.
+		inner := &block{
+			Kind:   conditionalBlock,
+			Header: rawLines[elseLine],
+		}
+
+		// Find the next branch directive (%elif/%else) within the remaining body.
+		nextElse := findElseDirectiveLine(rawLines, elseLine+1, bodyEnd)
+
+		nextThenEnd := bodyEnd
+		if nextElse >= 0 {
+			nextThenEnd = nextElse
+		}
+
+		if err := buildConditionalBranches(
+			rawLines, elseLine+1, nextThenEnd, nextElse, bodyEnd,
+			pairByIf, sectionHeaderSet, inner, isWrapper,
+		); err != nil {
+			return err
+		}
+
+		condBlock.Else = []*block{inner}
+	} else {
+		// %else: terminal branch — store directive and parse content directly.
+		condBlock.ElseDirective = rawLines[elseLine]
+		elseContainer := &block{Kind: rootBlock}
+
+		_, err := buildBlockChildren(rawLines, elseLine+1, bodyEnd, pairByIf, sectionHeaderSet, elseContainer, isWrapper)
+		if err != nil {
+			return err
+		}
+
+		condBlock.Else = elseContainer.Children
+	}
+
+	return nil
+}
+
+// isElifDirective returns true if the line is a %elif/%elifarch/%elifnarch/%elifos/%elifnos
+// directive (as opposed to a plain %else which is a terminal branch).
+func isElifDirective(rawLine string) bool {
+	lower := strings.ToLower(strings.Fields(strings.TrimSpace(rawLine))[0])
+
+	return lower != "%else" && isConditionalBranchDirective(rawLine)
+}
+
+// findTreeSectionEnd finds where a section ends: at the next section header at the
+// same nesting level, or at a conditional that wraps sections.
+func findTreeSectionEnd(start, end int, pairByIf map[int]conditionalPair, sectionHeaderSet map[int]bool) int {
+	i := start
+
+	for i < end {
+		if sectionHeaderSet[i] {
+			return i
+		}
+
+		if pair, ok := pairByIf[i]; ok {
+			if hasSectionHeaderInRange(i+1, pair.endifLine, sectionHeaderSet) {
+				return i
+			}
+
+			i = pair.endifLine + 1
+
+			continue
+		}
+
+		i++
+	}
+
+	return end
+}
+
+// findElseDirectiveLine finds the %else/%elif line within [start, end) at
+// conditional depth 0.
+func findElseDirectiveLine(rawLines []string, start, end int) int {
+	depth := 0
+
+	for i := start; i < end; i++ {
+		d := conditionalDepthChange(rawLines[i])
+
+		switch {
+		case d == 1:
+			depth++
+		case d == -1:
+			depth--
+		case depth == 0 && isConditionalBranchDirective(rawLines[i]):
+			return i
+		}
+	}
+
+	return -1
+}
+
+// isMacroDefLine returns the macro name if the line is a %define or %global directive.
+func isMacroDefLine(rawLine string) (string, bool) {
+	trimmed := strings.TrimSpace(rawLine)
+	tokens := strings.Fields(trimmed)
+
+	if len(tokens) < 2 {
+		return "", false
+	}
+
+	lower := strings.ToLower(tokens[0])
+	if lower == "%define" || lower == "%global" {
+		// Strip trailing parentheses from macro names with parameters,
+		// e.g. "%define foo(x)" → "foo".
+		name := tokens[1]
+		if idx := strings.IndexByte(name, '('); idx >= 0 {
+			name = name[:idx]
+		}
+
+		return name, true
+	}
+
+	return "", false
+}
+
+// getSectionNameAndPackageFromHeader extracts the section keyword and package name
+// from a section header line. Uses the existing [GetPackageNameFromSectionHeader]
+// for package name extraction.
+func getSectionNameAndPackageFromHeader(rawLine string) (string, string) {
+	tokens := strings.Fields(strings.TrimSpace(rawLine))
+	if len(tokens) == 0 {
+		return "", ""
+	}
+
+	sectName := tokens[0]
+
+	sectType, ok := sectionTypesByName[strings.ToLower(sectName)]
+	if !ok {
+		return sectName, ""
+	}
+
+	pkg := getPackageNameForSection(sectType, tokens)
+
+	return sectName, pkg
+}
+
+// serializeTree flattens a [block] tree back into raw spec lines.
+// The result preserves all original whitespace, comments, and blank lines.
+func serializeTree(block *block) []string {
+	var lines []string
+
+	switch block.Kind {
+	case rootBlock:
+		for _, child := range block.Children {
+			lines = append(lines, serializeTree(child)...)
+		}
+
+	case sectionBlock:
+		if block.Header != "" {
+			lines = append(lines, block.Header)
+		}
+
+		for _, child := range block.Children {
+			lines = append(lines, serializeTree(child)...)
+		}
+
+	case conditionalBlock:
+		lines = append(lines, block.Header)
+
+		for _, child := range block.Children {
+			lines = append(lines, serializeTree(child)...)
+		}
+
+		if block.Else != nil {
+			if block.ElseDirective != "" {
+				lines = append(lines, block.ElseDirective)
+			}
+
+			for _, child := range block.Else {
+				lines = append(lines, serializeTree(child)...)
+			}
+		}
+
+		if block.Endif != "" {
+			lines = append(lines, block.Endif)
+		}
+
+	case textBlock:
+		lines = append(lines, block.Lines...)
+
+	case macroDefBlock:
+		lines = append(lines, block.Lines...)
+	}
+
+	return lines
+}
+
+// --- Tree query helpers ---
+
+// findSectionBlock finds the first section block matching name and package,
+// searching recursively through conditional wrappers.
+func findSectionBlock(root *block, name, pkg string) *block {
+	for _, child := range root.Children {
+		if result := findSectionInBlock(child, name, pkg); result != nil {
+			return result
+		}
+	}
+
+	return nil
+}
+
+func findSectionInBlock(block *block, name, pkg string) *block {
+	if block.Kind == sectionBlock && block.Name == name && block.Package == pkg {
+		return block
+	}
+
+	if block.Kind == conditionalBlock {
+		for _, child := range block.Children {
+			if result := findSectionInBlock(child, name, pkg); result != nil {
+				return result
+			}
+		}
+
+		for _, child := range block.Else {
+			if result := findSectionInBlock(child, name, pkg); result != nil {
+				return result
+			}
+		}
+	}
+
+	return nil
+}
+
+// findAllSectionBlocks returns all section blocks matching name and package.
+func findAllSectionBlocks(root *block, name, pkg string) []*block {
+	var results []*block
+	collectMatchingSections(root, name, pkg, &results)
+
+	return results
+}
+
+func collectMatchingSections(block *block, name, pkg string, results *[]*block) {
+	if block.Kind == sectionBlock && block.Name == name && block.Package == pkg {
+		*results = append(*results, block)
+	}
+
+	for _, child := range block.Children {
+		collectMatchingSections(child, name, pkg, results)
+	}
+
+	if block.Kind == conditionalBlock {
+		for _, child := range block.Else {
+			collectMatchingSections(child, name, pkg, results)
+		}
+	}
+}
+
+// findAllSectionBlocksByPackage returns all section blocks matching a package name
+// (any section name).
+func findAllSectionBlocksByPackage(root *block, pkg string) []*block {
+	var results []*block
+	collectSectionsByPackage(root, pkg, &results)
+
+	return results
+}
+
+func collectSectionsByPackage(block *block, pkg string, results *[]*block) {
+	if block.Kind == sectionBlock && block.Package == pkg {
+		*results = append(*results, block)
+	}
+
+	for _, child := range block.Children {
+		collectSectionsByPackage(child, pkg, results)
+	}
+
+	if block.Kind == conditionalBlock {
+		for _, child := range block.Else {
+			collectSectionsByPackage(child, pkg, results)
+		}
+	}
+}
+
+// removeBlockFromParent removes a target block from any parent in the tree.
+// It searches recursively through all [conditionalBlock] nesting levels.
+func removeBlockFromParent(root *block, target *block) {
+	root.Children = filterBlocks(root.Children, target)
+
+	for _, child := range root.Children {
+		if child.Kind == conditionalBlock {
+			removeFromConditional(child, target)
+		}
+	}
+}
+
+func removeFromConditional(cond *block, target *block) {
+	cond.Children = filterBlocks(cond.Children, target)
+
+	if cond.Else != nil {
+		cond.Else = filterBlocks(cond.Else, target)
+	}
+
+	for _, child := range cond.Children {
+		if child.Kind == conditionalBlock {
+			removeFromConditional(child, target)
+		}
+	}
+
+	for _, child := range cond.Else {
+		if child.Kind == conditionalBlock {
+			removeFromConditional(child, target)
+		}
+	}
+}
+
+func filterBlocks(blocks []*block, exclude *block) []*block {
+	result := make([]*block, 0, len(blocks))
+
+	for _, b := range blocks {
+		if b != exclude {
+			result = append(result, b)
+		}
+	}
+
+	return result
+}
+
+// validateSectionRemoval checks that removing the given sections is safe.
+// It detects patterns where the tree's structural section boundaries don't
+// align with RPM's linear section ownership, which would produce incorrect
+// output if sections were naively removed.
+func validateSectionRemoval(root *block, toRemove []*block) error {
+	removeSet := make(map[*block]bool, len(toRemove))
+	for _, b := range toRemove {
+		removeSet[b] = true
+	}
+
+	// Check each level of the tree for unsafe patterns.
+	return validateRemovalInChildren(root.Children, removeSet)
+}
+
+func validateRemovalInChildren(children []*block, removeSet map[*block]bool) error {
+	for i, child := range children {
+		if child.Kind != conditionalBlock {
+			continue
+		}
+
+		// Check wrapper conditionals for orphaned content and cross-branch issues.
+		if err := validateConditionalRemoval(child, removeSet); err != nil {
+			return err
+		}
+
+		// Check if a wrapper conditional has orphaned text that semantically belongs
+		// to the section immediately preceding it. If that preceding section is being
+		// removed, the text would be orphaned.
+		if hasTextOrMacroContent(child.Children) && containsSectionBlocks(child) {
+			preceding := findPrecedingSection(children, i)
+			if preceding != nil && removeSet[preceding] {
+				return fmt.Errorf("conditional block spans across sections: %%if block at %q "+
+					"contains content belonging to the preceding section", child.Header)
+			}
+		}
+
+		// Check if removing sections from a wrapper would leave orphaned content
+		// in an adjacent non-wrapper conditional (case: adjacent content conditional
+		// after a wrapper whose only sections are being removed).
+		if wouldEmptyWrapper(child, removeSet) && i+1 < len(children) {
+			next := children[i+1]
+			if next.Kind == conditionalBlock && !containsSectionBlocks(next) && hasTextOrMacroContent(next.Children) {
+				return fmt.Errorf("conditional block spans across sections: content in %%if block at %q "+
+					"would be orphaned after removing the preceding section", next.Header)
+			}
+		}
+
+		// Recurse into wrapper conditional's branches.
+		if err := validateRemovalInChildren(child.Children, removeSet); err != nil {
+			return err
+		}
+
+		if child.Else != nil {
+			if err := validateRemovalInChildren(child.Else, removeSet); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// findPrecedingSection walks backwards from index i in children to find
+// the most recent sectionBlock, skipping over text and other blocks.
+func findPrecedingSection(children []*block, i int) *block {
+	for j := i - 1; j >= 0; j-- {
+		if children[j].Kind == sectionBlock {
+			return children[j]
+		}
+	}
+
+	return nil
+}
+
+func validateConditionalRemoval(cond *block, removeSet map[*block]bool) error {
+	thenHasRemovedSections := branchHasRemovedSections(cond.Children, removeSet)
+	elseHasRemovedSections := branchHasRemovedSections(cond.Else, removeSet)
+
+	if !thenHasRemovedSections && !elseHasRemovedSections {
+		return nil
+	}
+
+	// Check 1: orphaned text/macro content in same branch as removed section.
+	// This indicates content that semantically belongs to a preceding section
+	// but appears inside a wrapper conditional before the section header.
+	if thenHasRemovedSections && hasTextOrMacroContent(cond.Children) {
+		return fmt.Errorf("conditional block spans across sections: %%if block at %q "+
+			"contains content that would be orphaned", cond.Header)
+	}
+
+	if elseHasRemovedSections && hasTextOrMacroContent(cond.Else) {
+		return fmt.Errorf("conditional block spans across sections: %%else block at %q "+
+			"contains content that would be orphaned", cond.Header)
+	}
+
+	// Check 2: removing sections from one branch while the other branch
+	// has sections that are NOT being removed. This changes the conditional's
+	// semantics (was a toggle between packages, would become one-sided).
+	if thenHasRemovedSections && branchHasNonRemovedSections(cond.Else, removeSet) {
+		return fmt.Errorf("branch directive in conditional at %q prevents safe section removal: "+
+			"%%else branch contains sections that would remain", cond.Header)
+	}
+
+	if elseHasRemovedSections && branchHasNonRemovedSections(cond.Children, removeSet) {
+		return fmt.Errorf("branch directive in conditional at %q prevents safe section removal: "+
+			"%%if branch contains sections that would remain", cond.Header)
+	}
+
+	return nil
+}
+
+func branchHasRemovedSections(branch []*block, removeSet map[*block]bool) bool {
+	for _, child := range branch {
+		if child.Kind == sectionBlock && removeSet[child] {
+			return true
+		}
+
+		// Recurse into %elif chain links.
+		if child.Kind == conditionalBlock {
+			if branchHasRemovedSections(child.Children, removeSet) || branchHasRemovedSections(child.Else, removeSet) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func branchHasNonRemovedSections(branch []*block, removeSet map[*block]bool) bool {
+	for _, child := range branch {
+		if child.Kind == sectionBlock && !removeSet[child] {
+			return true
+		}
+
+		// Recurse into %elif chain links.
+		if child.Kind == conditionalBlock {
+			if branchHasNonRemovedSections(child.Children, removeSet) || branchHasNonRemovedSections(child.Else, removeSet) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func hasTextOrMacroContent(blocks []*block) bool {
+	for _, b := range blocks {
+		if b.Kind == textBlock || b.Kind == macroDefBlock {
+			return true
+		}
+	}
+
+	return false
+}
+
+// wouldEmptyWrapper checks if removing the targeted sections would leave
+// a wrapper conditional with no section content in either branch.
+func wouldEmptyWrapper(cond *block, removeSet map[*block]bool) bool {
+	if !containsSectionBlocks(cond) {
+		return false
+	}
+
+	for _, child := range cond.Children {
+		if child.Kind == sectionBlock && !removeSet[child] {
+			return false
+		}
+
+		if child.Kind == conditionalBlock && hasNonRemovedSectionsDeep(child, removeSet) {
+			return false
+		}
+	}
+
+	for _, child := range cond.Else {
+		if child.Kind == sectionBlock && !removeSet[child] {
+			return false
+		}
+
+		if child.Kind == conditionalBlock && hasNonRemovedSectionsDeep(child, removeSet) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func hasNonRemovedSectionsDeep(block *block, removeSet map[*block]bool) bool {
+	if block.Kind == sectionBlock && !removeSet[block] {
+		return true
+	}
+
+	for _, child := range block.Children {
+		if hasNonRemovedSectionsDeep(child, removeSet) {
+			return true
+		}
+	}
+
+	if block.Kind == conditionalBlock {
+		for _, child := range block.Else {
+			if hasNonRemovedSectionsDeep(child, removeSet) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
