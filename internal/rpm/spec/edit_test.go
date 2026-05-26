@@ -1411,6 +1411,121 @@ func TestParsePatchTagNumber(t *testing.T) {
 	}
 }
 
+func TestContinuationSuppressesStructuralParsing(t *testing.T) {
+	t.Run("section keyword in continuation body is not a section start", func(t *testing.T) {
+		input := `Name: test
+Version: 1.0
+
+%description
+A package.
+
+%install
+echo \
+%files \
+done
+
+%files
+/usr/bin/test
+`
+		sf, err := spec.OpenSpec(strings.NewReader(input))
+		require.NoError(t, err)
+
+		// %files inside the continuation should NOT be treated as a section start.
+		// Only one real %files section should exist.
+		var filesSections int
+
+		err = sf.Visit(func(ctx *spec.Context) error {
+			if ctx.Target.TargetType == spec.SectionStartTarget && ctx.CurrentSection.SectName == "%files" {
+				filesSections++
+			}
+
+			return nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, filesSections, "continuation body should not create a phantom %%files section")
+	})
+
+	t.Run("tag-like line in continuation body is not a tag", func(t *testing.T) {
+		input := `Name: test
+Version: 1.0
+
+%description
+A package.
+
+%install
+echo \
+Name: fake \
+done
+`
+		sf, err := spec.OpenSpec(strings.NewReader(input))
+		require.NoError(t, err)
+
+		var nameTagCount int
+
+		err = sf.VisitTags(func(tagLine *spec.TagLine, _ *spec.Context) error {
+			if tagLine.Tag == "Name" {
+				nameTagCount++
+			}
+
+			return nil
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, nameTagCount, "continuation body should not create a phantom Name tag")
+	})
+
+	t.Run("normal parsing resumes after continuation ends", func(t *testing.T) {
+		input := `Name: test
+Version: 1.0
+
+%description
+A package.
+
+%build
+echo \
+%install \
+done
+
+%install
+make install
+
+%files
+/usr/bin/test
+`
+		sf, err := spec.OpenSpec(strings.NewReader(input))
+		require.NoError(t, err)
+
+		found, err := sf.HasSection("%install")
+		require.NoError(t, err)
+		assert.True(t, found, "real %%install section after continuation should be found")
+
+		found, err = sf.HasSection("%files")
+		require.NoError(t, err)
+		assert.True(t, found, "%%files section should be found")
+	})
+
+	t.Run("chained multi-line continuation", func(t *testing.T) {
+		input := `Name: test
+Version: 1.0
+
+%build
+echo \
+%description \
+%files \
+%install \
+done
+`
+		sf, err := spec.OpenSpec(strings.NewReader(input))
+		require.NoError(t, err)
+
+		// None of the keywords in the continuation chain should create sections.
+		for _, sect := range []string{"%description", "%files", "%install"} {
+			found, err := sf.HasSection(sect)
+			require.NoError(t, err)
+			assert.False(t, found, "%%s in continuation chain should not be a section", sect)
+		}
+	})
+}
+
 func TestVisitTags(t *testing.T) {
 	input := `Name: main-pkg
 Version: 1.0

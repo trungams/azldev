@@ -137,7 +137,8 @@ func (*RawLine) GetType() ParsedLineType {
 }
 
 type parseState struct {
-	currentSect SectionTarget
+	currentSect    SectionTarget
+	inContinuation bool
 }
 
 func newParseState() parseState {
@@ -454,6 +455,15 @@ func (s *Spec) Visit(visitor Visitor) error {
 }
 
 func parseSpecLine(physicalText string, state parseState) (ParsedLine, parseState) {
+	// If the previous line ended with a backslash continuation, this line is a
+	// continuation body — suppress structural interpretation (section starts, tags)
+	// regardless of what the text looks like.
+	if state.inContinuation {
+		state.inContinuation = strings.HasSuffix(physicalText, "\\")
+
+		return &RawLine{Content: strings.TrimSpace(physicalText)}, state
+	}
+
 	parsedLine := newParsedLine(physicalText, state)
 
 	if sectionStartLine, ok := parsedLine.(*SectionStartLine); ok {
@@ -461,6 +471,9 @@ func parseSpecLine(physicalText string, state parseState) (ParsedLine, parseStat
 		state.currentSect.SectName = sectionStartLine.SectName
 		state.currentSect.Package = getPackageNameForSection(sectionStartLine.SectType, sectionStartLine.Tokens)
 	}
+
+	// Track whether this line starts a continuation (ends with backslash).
+	state.inContinuation = strings.HasSuffix(physicalText, "\\")
 
 	return parsedLine, state
 }
