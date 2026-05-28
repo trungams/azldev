@@ -596,10 +596,8 @@ func ParsePatchTagNumber(tag string) (int, bool) {
 func (s *Spec) HasSection(sectionName string) (bool, error) {
 	var found bool
 
-	err := s.Visit(func(ctx *Context) error {
-		if ctx.Target.TargetType == SectionStartTarget && ctx.CurrentSection.SectName == sectionName {
-			found = true
-		}
+	err := s.inspectTree(func(tree *specTree) error {
+		found = tree.HasSection(sectionName)
 
 		return nil
 	})
