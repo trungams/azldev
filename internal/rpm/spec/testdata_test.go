@@ -452,3 +452,114 @@ func TestSyntheticSpecsAddTag(t *testing.T) {
 		})
 	}
 }
+
+// --- Issue #203: macro hoisting on subpackage removal. ---
+
+// lineIndex returns the 0-based line index where target appears as an exact
+// trimmed-line match in lines, or -1 if no such line exists.
+func lineIndex(lines []string, target string) int {
+	for i, line := range lines {
+		if strings.TrimSpace(line) == target {
+			return i
+		}
+	}
+
+	return -1
+}
+
+// hasLine reports whether any trimmed line in lines equals target.
+func hasLine(lines []string, target string) bool {
+	return lineIndex(lines, target) >= 0
+}
+
+// hasLineWithPrefix reports whether any trimmed line in lines starts with
+// prefix. Useful for header lines like `%package tests` where the trailing
+// whitespace may vary.
+func hasLineWithPrefix(lines []string, prefix string) bool {
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// TestTestdataRemoveSubpackageHoistsReferencedMacro is the issue #203 repro
+// turned into a regression test. The fixture has `%define testsdir` inside
+// `%package tests` and references `%{testsdir}` from `%install` (which is
+// unconditional and survives subpackage removal).
+//
+// Required behavior: removing the `tests` subpackage must hoist the macro
+// definition to the root level (before the first removed section) so the
+// surviving references in `%install` still resolve. All sections targeting
+// the `tests` subpackage must still be removed.
+func TestTestdataRemoveSubpackageHoistsReferencedMacro(t *testing.T) {
+	specObj := openFixture(t, "subpackage-define-referenced.spec")
+
+	require.NoError(t, specObj.RemoveSubpackage("tests"))
+
+	out := serializeSpec(t, specObj)
+	outLines := strings.Split(out, "\n")
+
+	// The macro definition must survive as its own header line.
+	macroLine := "%define testsdir %{_libdir}/%{name}/tests-src"
+	assert.True(t, hasLine(outLines, macroLine),
+		"referenced macro must be hoisted, not dropped with the subpackage")
+
+	// All subpackage section headers must be gone (line-exact, ignoring the
+	// description text which legitimately mentions `%%package tests`).
+	assert.False(t, hasLineWithPrefix(outLines, "%package tests"),
+		"subpackage header must be removed")
+	assert.False(t, hasLineWithPrefix(outLines, "%description tests"),
+		"subpackage description must be removed")
+	assert.False(t, hasLineWithPrefix(outLines, "%files tests"),
+		"subpackage files must be removed")
+
+	// The hoisted macro must appear before %install so the surviving
+	// `%{testsdir}` references resolve.
+	macroIdx := lineIndex(outLines, macroLine)
+	installIdx := lineIndex(outLines, "%install")
+
+	require.GreaterOrEqual(t, macroIdx, 0, "hoisted macro must be in output")
+	require.GreaterOrEqual(t, installIdx, 0, "%install section must remain")
+	assert.Less(t, macroIdx, installIdx,
+		"hoisted macro must appear before %%install so the reference resolves")
+
+	// The reference itself must still exist in %install.
+	assert.Contains(t, out, "%{buildroot}%{testsdir}/python",
+		"surviving %%install must still reference the hoisted macro")
+
+	// Output must re-parse cleanly.
+	_, err := spec.OpenSpec(bytes.NewReader([]byte(out)))
+	require.NoError(t, err, "spec must re-parse after subpackage removal")
+}
+
+// TestTestdataRemoveSubpackageDoesNotHoistUnreferencedMacro verifies the
+// negative case: when a `%define` inside a subpackage is only referenced from
+// within that same subpackage, removal drops it cleanly (no hoisting needed,
+// no noise added to the result).
+func TestTestdataRemoveSubpackageDoesNotHoistUnreferencedMacro(t *testing.T) {
+	specObj := openFixture(t, "subpackage-define-unreferenced.spec")
+
+	require.NoError(t, specObj.RemoveSubpackage("tools"))
+
+	out := serializeSpec(t, specObj)
+	outLines := strings.Split(out, "\n")
+
+	// The macro must be gone -- no `%define toolsdir ...` line anywhere.
+	assert.False(t, hasLineWithPrefix(outLines, "%define toolsdir"),
+		"unreferenced macro must be dropped along with the subpackage")
+
+	// All subpackage section headers must be gone.
+	assert.False(t, hasLineWithPrefix(outLines, "%package tools"),
+		"subpackage header must be removed")
+	assert.False(t, hasLineWithPrefix(outLines, "%description tools"),
+		"subpackage description must be removed")
+	assert.False(t, hasLineWithPrefix(outLines, "%files tools"),
+		"subpackage files must be removed")
+
+	// Output must re-parse cleanly.
+	_, err := spec.OpenSpec(bytes.NewReader([]byte(out)))
+	require.NoError(t, err, "spec must re-parse after subpackage removal")
+}

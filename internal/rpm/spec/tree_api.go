@@ -120,6 +120,11 @@ func (t *specTree) handles(blocks []*block) []*sectionHandle {
 // RemoveSections removes the given sections from the tree. Removal is validated
 // as a set: if any one removal would orphan content or break a conditional's
 // semantics, the entire operation fails and the tree is left unmodified.
+//
+// Macro definitions (`%define` / `%global`) that live inside the removed
+// sections but are referenced by surviving content are automatically hoisted
+// to the root level just before the first removed section. See
+// [hoistReferencedMacros] for the full behavior.
 func (t *specTree) RemoveSections(handles []*sectionHandle) error {
 	blocks := make([]*block, len(handles))
 	for i, h := range handles {
@@ -129,6 +134,8 @@ func (t *specTree) RemoveSections(handles []*sectionHandle) error {
 	if err := validateSectionRemoval(t.root, blocks); err != nil {
 		return err
 	}
+
+	hoistReferencedMacros(t.root, blocks)
 
 	for _, b := range blocks {
 		removeBlockFromParent(t.root, b)
