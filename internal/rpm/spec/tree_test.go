@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-package spec
+package spec //nolint:testpackage // Tests access unexported tree types (block, parseTree, etc.).
 
 import (
 	"strings"
@@ -315,6 +315,7 @@ make`,
 	}
 }
 
+//nolint:maintidx // Comprehensive table-driven structural test covering all block kinds.
 func TestParseTreeStructure(t *testing.T) {
 	t.Run("simple spec sections", func(t *testing.T) {
 		input := `Name: test
@@ -339,6 +340,7 @@ make install
 		// Preamble is now wrapped in a sectionBlock with empty name.
 		// Named sections are sectionBlock children.
 		var sectionNames []string
+
 		for _, child := range root.Children {
 			if child.Kind == sectionBlock {
 				sectionNames = append(sectionNames, child.Name)
@@ -398,6 +400,7 @@ make release
 		require.NotNil(t, buildSect)
 
 		hasConditional := false
+
 		for _, child := range buildSect.Children {
 			if child.Kind == conditionalBlock {
 				hasConditional = true
@@ -449,6 +452,7 @@ CFLAGS="%{buildflags}" make`
 		require.NotNil(t, buildSect)
 
 		hasMacroDef := false
+
 		for _, child := range buildSect.Children {
 			if child.Kind == macroDefBlock && child.Name == "buildflags" {
 				hasMacroDef = true
@@ -476,6 +480,7 @@ make`
 
 		// The macro should have 3 lines (header + 2 continuation).
 		var macroBlock *block
+
 		for _, child := range root.Children {
 			if child.Kind == sectionBlock && child.Name == "" {
 				// Preamble — look for macro.
@@ -575,6 +580,7 @@ make`
 
 		// Find the conditional block (inside preamble section as content).
 		var cond *block
+
 		for _, child := range root.Children {
 			if child.Kind == sectionBlock && child.Name == "" {
 				for _, pc := range child.Children {
@@ -586,6 +592,7 @@ make`
 				}
 			}
 		}
+
 		require.NotNil(t, cond, "should find conditional in preamble")
 		assert.Equal(t, "%if 0%{?rhel}", cond.Header)
 		assert.Equal(t, "%endif", cond.Endif)

@@ -387,13 +387,13 @@ func (h *sectionHandle) findTagInsertAnchor(family string) *tagInsertAnchor {
 	for _, child := range h.block.Children {
 		switch child.Kind {
 		case textBlock:
-			for i, line := range child.Lines {
+			for tagLineIdx, line := range child.Lines {
 				tag, _, isTag := parseTagLine(line)
 				if !isTag {
 					continue
 				}
 
-				anchor := &tagInsertAnchor{inTextBlock: child, lineIdx: i}
+				anchor := &tagInsertAnchor{inTextBlock: child, lineIdx: tagLineIdx}
 				lastAny = anchor
 
 				if tagFamily(tag) == family {

@@ -405,13 +405,13 @@ func generateSyntheticSpec(seed1, seed2 uint64) string {
 func TestSyntheticSpecsRoundTrip(t *testing.T) {
 	const iterations = 64
 
-	for i := range iterations {
-		//nolint:gosec // i is bounded by iterations, no overflow risk
-		seed1 := uint64(i + 1)
-		//nolint:gosec // i is bounded by iterations, no overflow risk
-		seed2 := uint64(i)*1099511628211 + 14695981039346656037
+	for iteration := range iterations {
+		//nolint:gosec // iteration is bounded by iterations, no overflow risk
+		seed1 := uint64(iteration + 1)
+		//nolint:gosec // iteration is bounded by iterations, no overflow risk
+		seed2 := uint64(iteration)*1099511628211 + 14695981039346656037
 
-		t.Run("seed_"+strconv.Itoa(i), func(t *testing.T) {
+		t.Run("seed_"+strconv.Itoa(iteration), func(t *testing.T) {
 			input := generateSyntheticSpec(seed1, seed2)
 
 			s, err := spec.OpenSpec(bytes.NewReader([]byte(input)))
@@ -430,13 +430,13 @@ func TestSyntheticSpecsRoundTrip(t *testing.T) {
 func TestSyntheticSpecsAddTag(t *testing.T) {
 	const iterations = 32
 
-	for i := range iterations {
-		//nolint:gosec // i is bounded by iterations, no overflow risk
-		seed1 := uint64(i + 1000)
-		//nolint:gosec // i is bounded by iterations, no overflow risk
-		seed2 := uint64(i)*0x9E3779B97F4A7C15 + 0xBF58476D1CE4E5B9
+	for iteration := range iterations {
+		//nolint:gosec // iteration is bounded by iterations, no overflow risk
+		seed1 := uint64(iteration + 1000)
+		//nolint:gosec // iteration is bounded by iterations, no overflow risk
+		seed2 := uint64(iteration)*0x9E3779B97F4A7C15 + 0xBF58476D1CE4E5B9
 
-		t.Run("seed_"+strconv.Itoa(i), func(t *testing.T) {
+		t.Run("seed_"+strconv.Itoa(iteration), func(t *testing.T) {
 			input := generateSyntheticSpec(seed1, seed2)
 
 			s, err := spec.OpenSpec(bytes.NewReader([]byte(input)))

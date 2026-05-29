@@ -90,7 +90,7 @@ func parseTree(rawLines []string) (*block, error) {
 
 	root := &block{Kind: rootBlock}
 
-	_, err = buildBlockChildren(rawLines, 0, len(rawLines), pairByIf, sectionHeaderSet, root, true)
+	err = buildBlockChildren(rawLines, 0, len(rawLines), pairByIf, sectionHeaderSet, root, true)
 	if err != nil {
 		return nil, fmt.Errorf("building spec tree:\n%w", err)
 	}
@@ -111,15 +111,15 @@ func wrapPreamble(root *block) {
 	// Find the index of the first sectionBlock or section-wrapping conditionalBlock.
 	firstSectionIdx := -1
 
-	for i, child := range root.Children {
+	for childIdx, child := range root.Children {
 		if child.Kind == sectionBlock {
-			firstSectionIdx = i
+			firstSectionIdx = childIdx
 
 			break
 		}
 
 		if child.Kind == conditionalBlock && containsSectionBlocks(child) {
-			firstSectionIdx = i
+			firstSectionIdx = childIdx
 
 			break
 		}
@@ -183,7 +183,7 @@ func findSectionHeaderLines(rawLines []string) []int {
 
 	inCont := false
 
-	for i, line := range rawLines {
+	for lineIdx, line := range rawLines {
 		if inCont {
 			inCont = strings.HasSuffix(line, "\\")
 
@@ -191,7 +191,7 @@ func findSectionHeaderLines(rawLines []string) []int {
 		}
 
 		if isSectionHeaderLine(line) {
-			headers = append(headers, i)
+			headers = append(headers, lineIdx)
 		}
 
 		inCont = strings.HasSuffix(line, "\\")
@@ -227,7 +227,7 @@ func hasSectionHeaderInRange(start, end int, sectionHeaderSet map[int]bool) bool
 // to parent.Children. topLevel indicates whether sections can appear (true at
 // root level and inside conditional wrappers).
 //
-//nolint:funlen,cyclop // Recursive parser with multiple block types.
+//nolint:funlen,gocognit // Recursive parser with multiple block types.
 func buildBlockChildren(
 	rawLines []string,
 	start, end int,
@@ -235,8 +235,8 @@ func buildBlockChildren(
 	sectionHeaderSet map[int]bool,
 	parent *block,
 	topLevel bool,
-) (int, error) {
-	i := start
+) error {
+	lineIdx := start
 	inCont := false
 
 	var textBuf []string
@@ -252,19 +252,19 @@ func buildBlockChildren(
 		}
 	}
 
-	for i < end {
-		line := rawLines[i]
+	for lineIdx < end {
+		line := rawLines[lineIdx]
 
 		if inCont {
 			textBuf = append(textBuf, line)
 			inCont = strings.HasSuffix(line, "\\")
-			i++
+			lineIdx++
 
 			continue
 		}
 
 		// Section headers (only at top level).
-		if topLevel && sectionHeaderSet[i] {
+		if topLevel && sectionHeaderSet[lineIdx] {
 			flushText()
 
 			name, pkg := getSectionNameAndPackageFromHeader(line)
@@ -275,15 +275,15 @@ func buildBlockChildren(
 				Package: pkg,
 			}
 
-			sectionEnd := findTreeSectionEnd(i+1, end, pairByIf, sectionHeaderSet)
+			sectionEnd := findTreeSectionEnd(lineIdx+1, end, pairByIf, sectionHeaderSet)
 
-			_, err := buildBlockChildren(rawLines, i+1, sectionEnd, pairByIf, sectionHeaderSet, sectionBlock, false)
+			err := buildBlockChildren(rawLines, lineIdx+1, sectionEnd, pairByIf, sectionHeaderSet, sectionBlock, false)
 			if err != nil {
-				return i, err
+				return err
 			}
 
 			parent.Children = append(parent.Children, sectionBlock)
-			i = sectionEnd
+			lineIdx = sectionEnd
 
 			continue
 		}
@@ -292,9 +292,9 @@ func buildBlockChildren(
 		if conditionalDepthChange(line) == 1 {
 			flushText()
 
-			pair, ok := pairByIf[i]
+			pair, ok := pairByIf[lineIdx]
 			if !ok {
-				return i, fmt.Errorf("%%if at line %d has no matching pair", i+1)
+				return fmt.Errorf("%%if at line %d has no matching pair", lineIdx+1)
 			}
 
 			condBlock := &block{
@@ -303,7 +303,7 @@ func buildBlockChildren(
 				Endif:  rawLines[pair.endifLine],
 			}
 
-			bodyStart := i + 1
+			bodyStart := lineIdx + 1
 			bodyEnd := pair.endifLine
 
 			elseLine := findElseDirectiveLine(rawLines, bodyStart, bodyEnd)
@@ -319,11 +319,11 @@ func buildBlockChildren(
 				rawLines, bodyStart, thenEnd, elseLine, bodyEnd,
 				pairByIf, sectionHeaderSet, condBlock, isWrapper,
 			); err != nil {
-				return i, err
+				return err
 			}
 
 			parent.Children = append(parent.Children, condBlock)
-			i = pair.endifLine + 1
+			lineIdx = pair.endifLine + 1
 
 			continue
 		}
@@ -341,22 +341,22 @@ func buildBlockChildren(
 
 			if strings.HasSuffix(line, "\\") {
 				inCont = true
-				i++
+				lineIdx++
 
-				for i < end {
-					macroBlock.Lines = append(macroBlock.Lines, rawLines[i])
+				for lineIdx < end {
+					macroBlock.Lines = append(macroBlock.Lines, rawLines[lineIdx])
 
-					if !strings.HasSuffix(rawLines[i], "\\") {
+					if !strings.HasSuffix(rawLines[lineIdx], "\\") {
 						inCont = false
-						i++
+						lineIdx++
 
 						break
 					}
 
-					i++
+					lineIdx++
 				}
 			} else {
-				i++
+				lineIdx++
 			}
 
 			parent.Children = append(parent.Children, macroBlock)
@@ -367,12 +367,12 @@ func buildBlockChildren(
 		// Plain text line.
 		textBuf = append(textBuf, line)
 		inCont = strings.HasSuffix(line, "\\")
-		i++
+		lineIdx++
 	}
 
 	flushText()
 
-	return i, nil
+	return nil
 }
 
 // buildConditionalBranches parses the then and optional else/elif branches of a
@@ -386,7 +386,7 @@ func buildConditionalBranches(
 	condBlock *block,
 	isWrapper bool,
 ) error {
-	_, err := buildBlockChildren(rawLines, bodyStart, thenEnd, pairByIf, sectionHeaderSet, condBlock, isWrapper)
+	err := buildBlockChildren(rawLines, bodyStart, thenEnd, pairByIf, sectionHeaderSet, condBlock, isWrapper)
 	if err != nil {
 		return err
 	}
@@ -424,7 +424,7 @@ func buildConditionalBranches(
 		condBlock.ElseDirective = rawLines[elseLine]
 		elseContainer := &block{Kind: rootBlock}
 
-		_, err := buildBlockChildren(rawLines, elseLine+1, bodyEnd, pairByIf, sectionHeaderSet, elseContainer, isWrapper)
+		err := buildBlockChildren(rawLines, elseLine+1, bodyEnd, pairByIf, sectionHeaderSet, elseContainer, isWrapper)
 		if err != nil {
 			return err
 		}
@@ -446,24 +446,24 @@ func isElifDirective(rawLine string) bool {
 // findTreeSectionEnd finds where a section ends: at the next section header at the
 // same nesting level, or at a conditional that wraps sections.
 func findTreeSectionEnd(start, end int, pairByIf map[int]conditionalPair, sectionHeaderSet map[int]bool) int {
-	i := start
+	lineIdx := start
 
-	for i < end {
-		if sectionHeaderSet[i] {
-			return i
+	for lineIdx < end {
+		if sectionHeaderSet[lineIdx] {
+			return lineIdx
 		}
 
-		if pair, ok := pairByIf[i]; ok {
-			if hasSectionHeaderInRange(i+1, pair.endifLine, sectionHeaderSet) {
-				return i
+		if pair, ok := pairByIf[lineIdx]; ok {
+			if hasSectionHeaderInRange(lineIdx+1, pair.endifLine, sectionHeaderSet) {
+				return lineIdx
 			}
 
-			i = pair.endifLine + 1
+			lineIdx = pair.endifLine + 1
 
 			continue
 		}
 
-		i++
+		lineIdx++
 	}
 
 	return end
@@ -474,16 +474,16 @@ func findTreeSectionEnd(start, end int, pairByIf map[int]conditionalPair, sectio
 func findElseDirectiveLine(rawLines []string, start, end int) int {
 	depth := 0
 
-	for i := start; i < end; i++ {
-		d := conditionalDepthChange(rawLines[i])
+	for lineIdx := start; lineIdx < end; lineIdx++ {
+		d := conditionalDepthChange(rawLines[lineIdx])
 
 		switch {
 		case d == 1:
 			depth++
 		case d == -1:
 			depth--
-		case depth == 0 && isConditionalBranchDirective(rawLines[i]):
-			return i
+		case depth == 0 && isConditionalBranchDirective(rawLines[lineIdx]):
+			return lineIdx
 		}
 	}
 
@@ -495,7 +495,9 @@ func isMacroDefLine(rawLine string) (string, bool) {
 	trimmed := strings.TrimSpace(rawLine)
 	tokens := strings.Fields(trimmed)
 
-	if len(tokens) < 2 {
+	const minMacroDefTokens = 2
+
+	if len(tokens) < minMacroDefTokens {
 		return "", false
 	}
 
@@ -729,8 +731,9 @@ func validateSectionRemoval(root *block, toRemove []*block) error {
 	return validateRemovalInChildren(root.Children, removeSet)
 }
 
+//nolint:cyclop // Validation logic with multiple conditional checks per block kind.
 func validateRemovalInChildren(children []*block, removeSet map[*block]bool) error {
-	for i, child := range children {
+	for childIdx, child := range children {
 		if child.Kind != conditionalBlock {
 			continue
 		}
@@ -744,7 +747,7 @@ func validateRemovalInChildren(children []*block, removeSet map[*block]bool) err
 		// to the section immediately preceding it. If that preceding section is being
 		// removed, the text would be orphaned.
 		if hasTextOrMacroContent(child.Children) && containsSectionBlocks(child) {
-			preceding := findPrecedingSection(children, i)
+			preceding := findPrecedingSection(children, childIdx)
 			if preceding != nil && removeSet[preceding] {
 				return fmt.Errorf("%%if block at %q "+
 					"contains content belonging to the preceding section:\n%w",
@@ -755,8 +758,8 @@ func validateRemovalInChildren(children []*block, removeSet map[*block]bool) err
 		// Check if removing sections from a wrapper would leave orphaned content
 		// in an adjacent non-wrapper conditional (case: adjacent content conditional
 		// after a wrapper whose only sections are being removed).
-		if wouldEmptyWrapper(child, removeSet) && i+1 < len(children) {
-			next := children[i+1]
+		if wouldEmptyWrapper(child, removeSet) && childIdx+1 < len(children) {
+			next := children[childIdx+1]
 			if next.Kind == conditionalBlock && !containsSectionBlocks(next) && hasTextOrMacroContent(next.Children) {
 				return fmt.Errorf("content in %%if block at %q "+
 					"would be orphaned after removing the preceding section:\n%w",

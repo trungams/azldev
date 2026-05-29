@@ -1427,14 +1427,14 @@ done
 %files
 /usr/bin/test
 `
-		sf, err := spec.OpenSpec(strings.NewReader(input))
+		specFile, err := spec.OpenSpec(strings.NewReader(input))
 		require.NoError(t, err)
 
 		// %files inside the continuation should NOT be treated as a section start.
 		// Only one real %files section should exist.
 		var filesSections int
 
-		err = sf.Visit(func(ctx *spec.Context) error {
+		err = specFile.Visit(func(ctx *spec.Context) error {
 			if ctx.Target.TargetType == spec.SectionStartTarget && ctx.CurrentSection.SectName == "%files" {
 				filesSections++
 			}
@@ -1457,12 +1457,12 @@ echo \
 Name: fake \
 done
 `
-		sf, err := spec.OpenSpec(strings.NewReader(input))
+		specFile, err := spec.OpenSpec(strings.NewReader(input))
 		require.NoError(t, err)
 
 		var nameTagCount int
 
-		err = sf.VisitTags(func(tagLine *spec.TagLine, _ *spec.Context) error {
+		err = specFile.VisitTags(func(tagLine *spec.TagLine, _ *spec.Context) error {
 			if tagLine.Tag == "Name" {
 				nameTagCount++
 			}
@@ -1491,14 +1491,14 @@ make install
 %files
 /usr/bin/test
 `
-		sf, err := spec.OpenSpec(strings.NewReader(input))
+		specFile, err := spec.OpenSpec(strings.NewReader(input))
 		require.NoError(t, err)
 
-		found, err := sf.HasSection("%install")
+		found, err := specFile.HasSection("%install")
 		require.NoError(t, err)
 		assert.True(t, found, "real %%install section after continuation should be found")
 
-		found, err = sf.HasSection("%files")
+		found, err = specFile.HasSection("%files")
 		require.NoError(t, err)
 		assert.True(t, found, "%%files section should be found")
 	})
