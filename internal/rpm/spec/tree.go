@@ -731,21 +731,21 @@ func validateSectionRemoval(root *block, toRemove []*block) error {
 	return validateRemovalInChildren(root.Children, removeSet)
 }
 
-//nolint:cyclop // Validation logic with multiple conditional checks per block kind.
 func validateRemovalInChildren(children []*block, removeSet map[*block]bool) error {
 	for childIdx, child := range children {
 		if child.Kind != conditionalBlock {
 			continue
 		}
 
-		// Check wrapper conditionals for orphaned content and cross-branch issues.
-		if err := validateConditionalRemoval(child, removeSet); err != nil {
-			return err
-		}
-
 		// Check if a wrapper conditional has orphaned text that semantically belongs
 		// to the section immediately preceding it. If that preceding section is being
 		// removed, the text would be orphaned.
+		//
+		// Note: cross-branch asymmetry (removing sections from %if but not %else,
+		// or vice versa) is intentionally allowed — a valid use case is removing
+		// a subpackage from one branch while keeping the alternative in the other.
+		// Text/macro content alongside surviving sections is also fine — it belongs
+		// to the section preceding the wrapper, not to the removed section.
 		if hasTextOrMacroContent(child.Children) && containsSectionBlocks(child) {
 			preceding := findPrecedingSection(children, childIdx)
 			if preceding != nil && removeSet[preceding] {
@@ -792,79 +792,6 @@ func findPrecedingSection(children []*block, i int) *block {
 	}
 
 	return nil
-}
-
-func validateConditionalRemoval(cond *block, removeSet map[*block]bool) error {
-	thenHasRemovedSections := branchHasRemovedSections(cond.Children, removeSet)
-	elseHasRemovedSections := branchHasRemovedSections(cond.Else, removeSet)
-
-	if !thenHasRemovedSections && !elseHasRemovedSections {
-		return nil
-	}
-
-	// Check 1: orphaned text/macro content in same branch as removed section.
-	// This indicates content that semantically belongs to a preceding section
-	// but appears inside a wrapper conditional before the section header.
-	if thenHasRemovedSections && hasTextOrMacroContent(cond.Children) {
-		return fmt.Errorf("%%if block at %q "+
-			"contains content that would be orphaned:\n%w",
-			cond.Header, ErrConditionalSpansSections)
-	}
-
-	if elseHasRemovedSections && hasTextOrMacroContent(cond.Else) {
-		return fmt.Errorf("%%else block at %q "+
-			"contains content that would be orphaned:\n%w",
-			cond.Header, ErrConditionalSpansSections)
-	}
-
-	// Check 2: removing sections from one branch while the other branch
-	// has sections that are NOT being removed. This changes the conditional's
-	// semantics (was a toggle between packages, would become one-sided).
-	if thenHasRemovedSections && branchHasNonRemovedSections(cond.Else, removeSet) {
-		return fmt.Errorf("branch directive in conditional at %q prevents safe section removal: "+
-			"%%else branch contains sections that would remain", cond.Header)
-	}
-
-	if elseHasRemovedSections && branchHasNonRemovedSections(cond.Children, removeSet) {
-		return fmt.Errorf("branch directive in conditional at %q prevents safe section removal: "+
-			"%%if branch contains sections that would remain", cond.Header)
-	}
-
-	return nil
-}
-
-func branchHasRemovedSections(branch []*block, removeSet map[*block]bool) bool {
-	for _, child := range branch {
-		if child.Kind == sectionBlock && removeSet[child] {
-			return true
-		}
-
-		// Recurse into %elif chain links.
-		if child.Kind == conditionalBlock {
-			if branchHasRemovedSections(child.Children, removeSet) || branchHasRemovedSections(child.Else, removeSet) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-func branchHasNonRemovedSections(branch []*block, removeSet map[*block]bool) bool {
-	for _, child := range branch {
-		if child.Kind == sectionBlock && !removeSet[child] {
-			return true
-		}
-
-		// Recurse into %elif chain links.
-		if child.Kind == conditionalBlock {
-			if branchHasNonRemovedSections(child.Children, removeSet) || branchHasNonRemovedSections(child.Else, removeSet) {
-				return true
-			}
-		}
-	}
-
-	return false
 }
 
 func hasTextOrMacroContent(blocks []*block) bool {

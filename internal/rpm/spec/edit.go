@@ -700,15 +700,37 @@ type conditionalPair struct {
 }
 
 // collectConditionalPairs walks the raw lines and returns all matched `%if`/`%endif`
-// pairs using a stack. Nested pairs are properly matched. Returns an error if there
-// are unmatched `%if` or `%endif` directives.
+// pairs using a stack. Nested pairs are properly matched. Lines inside
+// macro definition continuations are skipped — `%if`/`%endif` that appear
+// inside multi-line `%define`/`%global` bodies (e.g. `%define foo() \` …
+// `%if …\` … `%endif\`) are RPM macro body text, not structural conditionals.
+// However, `%if`/`%endif` inside general shell continuations (e.g.
+// `configure \` … `%if …` … `%endif`) ARE structural — RPM evaluates them
+// as preprocessor directives before shell interpretation. Returns an error if
+// there are unmatched `%if` or `%endif` directives.
 func collectConditionalPairs(rawLines []string) ([]conditionalPair, error) {
 	var (
 		pairs []conditionalPair
 		stack []int
 	)
 
+	inMacroCont := false
+
 	for lineNum, line := range rawLines {
+		if inMacroCont {
+			inMacroCont = strings.HasSuffix(line, "\\")
+
+			continue
+		}
+
+		// Only skip continuations that start from a %define/%global line —
+		// those are macro body text where %if/%endif are not structural.
+		if _, isMacro := isMacroDefLine(line); isMacro && strings.HasSuffix(line, "\\") {
+			inMacroCont = true
+
+			continue
+		}
+
 		switch conditionalDepthChange(line) {
 		case 1:
 			stack = append(stack, lineNum)

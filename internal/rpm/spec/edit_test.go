@@ -1101,6 +1101,209 @@ Name: test
 		err = specFile.AppendLinesToSection("%description", "", []string{"New line"})
 		require.Error(t, err)
 	})
+
+	// ---- Conditional boundary tests ----
+	//
+	// These tests document AppendLinesToSection behavior at conditional boundaries.
+	// When a section is followed by a %if wrapper that contains the next section,
+	// the tree parser correctly identifies the wrapper boundary. Appended lines
+	// land at the end of the section body, before the wrapper.
+
+	t.Run("appends before conditional wrapping next section", func(t *testing.T) {
+		// The %if wraps %install, not %build. "echo done" belongs in %build.
+		input := `
+Name: test
+
+%build
+make
+
+%if %{with_docs}
+%install
+install.sh
+%endif
+`
+		specFile, err := spec.OpenSpec(strings.NewReader(input))
+		require.NoError(t, err)
+
+		err = specFile.AppendLinesToSection("%build", "", []string{"echo done"})
+		require.NoError(t, err)
+
+		actual := new(bytes.Buffer)
+
+		err = specFile.Serialize(actual)
+		require.NoError(t, err)
+
+		// Tree-based code correctly places "echo done" before the wrapper %if.
+		assert.Equal(t, `
+Name: test
+
+%build
+make
+
+echo done
+%if %{with_docs}
+%install
+install.sh
+%endif
+`, actual.String())
+	})
+
+	t.Run("appends before nested conditionals wrapping next section", func(t *testing.T) {
+		input := `
+Name: test
+
+%build
+make
+
+%if %{with_docs}
+%ifarch x86_64
+%install
+install.sh
+%endif
+%endif
+`
+		specFile, err := spec.OpenSpec(strings.NewReader(input))
+		require.NoError(t, err)
+
+		err = specFile.AppendLinesToSection("%build", "", []string{"echo done"})
+		require.NoError(t, err)
+
+		actual := new(bytes.Buffer)
+
+		err = specFile.Serialize(actual)
+		require.NoError(t, err)
+
+		// Tree-based code correctly places "echo done" before the outer wrapper.
+		assert.Equal(t, `
+Name: test
+
+%build
+make
+
+echo done
+%if %{with_docs}
+%ifarch x86_64
+%install
+install.sh
+%endif
+%endif
+`, actual.String())
+	})
+
+	t.Run("appends correctly when section has own balanced conditional", func(t *testing.T) {
+		// %if/%endif is fully within %build, so the boundary is correct.
+		input := `
+Name: test
+
+%build
+%if %{with_docs}
+make docs
+%endif
+make
+
+%install
+install.sh
+`
+		specFile, err := spec.OpenSpec(strings.NewReader(input))
+		require.NoError(t, err)
+
+		err = specFile.AppendLinesToSection("%build", "", []string{"echo done"})
+		require.NoError(t, err)
+
+		actual := new(bytes.Buffer)
+
+		err = specFile.Serialize(actual)
+		require.NoError(t, err)
+
+		assert.Equal(t, `
+Name: test
+
+%build
+%if %{with_docs}
+make docs
+%endif
+make
+
+echo done
+%install
+install.sh
+`, actual.String())
+	})
+
+	t.Run("appends correctly when no conditionals at boundary", func(t *testing.T) {
+		input := `
+Name: test
+
+%build
+make
+
+%install
+install.sh
+`
+		specFile, err := spec.OpenSpec(strings.NewReader(input))
+		require.NoError(t, err)
+
+		err = specFile.AppendLinesToSection("%build", "", []string{"echo done"})
+		require.NoError(t, err)
+
+		actual := new(bytes.Buffer)
+
+		err = specFile.Serialize(actual)
+		require.NoError(t, err)
+
+		assert.Equal(t, `
+Name: test
+
+%build
+make
+
+echo done
+%install
+install.sh
+`, actual.String())
+	})
+
+	t.Run("appends before preamble conditional wrapping next section", func(t *testing.T) {
+		// In the preamble, a trailing %if wrapper contains %description.
+		// The tree parser correctly identifies the wrapper boundary.
+		input := `
+Name: test
+Source0: test.tar.gz
+
+%if %{with_docs}
+%description
+A test package.
+%endif
+
+%build
+make
+`
+		specFile, err := spec.OpenSpec(strings.NewReader(input))
+		require.NoError(t, err)
+
+		err = specFile.AppendLinesToSection("", "", []string{"Vendor: Microsoft"})
+		require.NoError(t, err)
+
+		actual := new(bytes.Buffer)
+
+		err = specFile.Serialize(actual)
+		require.NoError(t, err)
+
+		// Tree-based code correctly places "Vendor: Microsoft" before the wrapper.
+		assert.Equal(t, `
+Name: test
+Source0: test.tar.gz
+
+Vendor: Microsoft
+%if %{with_docs}
+%description
+A test package.
+%endif
+
+%build
+make
+`, actual.String())
+	})
 }
 
 func TestHasSection(t *testing.T) {
@@ -2075,7 +2278,7 @@ Main.
 			errorContains: "conditional block spans",
 		},
 		{
-			name: "errors on else branch inside straddling conditional",
+			name: "removes section from one branch while else branch retains sections",
 			input: `Name: test
 
 %description
@@ -2092,9 +2295,21 @@ Main.
 %files
 /usr/bin/test
 `,
-			packageName:   "foo",
-			errorExpected: true,
-			errorContains: "branch directive",
+			packageName: "foo",
+			expectedOutput: `Name: test
+
+%description
+Main.
+
+%if cond
+%else
+%files bar
+/usr/share/bar
+%endif
+
+%files
+/usr/bin/test
+`,
 		},
 		{
 			name: "errors when trimmed zone contains section content in a balanced conditional",
