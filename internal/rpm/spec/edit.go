@@ -56,24 +56,23 @@ func (s *Spec) UpdateExistingTag(packageName string, tag string, value string) (
 	var updated bool
 
 	err = s.mutateTree(func(tree *specTree) error {
-		return tree.VisitAllLines(func(secName, secPkg string, lh *lineHandle) error {
+		return tree.VisitAllLines(func(secName, secPkg string, line *lineHandle) error {
 			if updated || secPkg != packageName || !isTagBearingSection(secName) {
 				return nil
 			}
 
-			parsedTag, _, isTag := parseTagLine(lh.Text)
+			parsedTag, _, isTag := parseTagLine(line.Text)
 			if !isTag || strings.ToLower(parsedTag) != tagToCompareAgainst {
 				return nil
 			}
 
-			lh.Replace(fmt.Sprintf("%s: %s", tag, value))
+			line.Replace(fmt.Sprintf("%s: %s", tag, value))
 
 			updated = true
 
 			return nil
 		})
 	})
-
 	if err != nil {
 		return err
 	}
@@ -158,17 +157,17 @@ func (s *Spec) RemoveTagsMatching(packageName string, matcher func(tag, value st
 	removed := 0
 
 	err := s.mutateTree(func(tree *specTree) error {
-		return tree.VisitAllLines(func(secName, secPkg string, lh *lineHandle) error {
+		return tree.VisitAllLines(func(secName, secPkg string, line *lineHandle) error {
 			if secPkg != packageName || !isTagBearingSection(secName) {
 				return nil
 			}
 
-			parsedTag, parsedValue, isTag := parseTagLine(lh.Text)
+			parsedTag, parsedValue, isTag := parseTagLine(line.Text)
 			if !isTag || !matcher(parsedTag, parsedValue) {
 				return nil
 			}
 
-			lh.Remove()
+			line.Remove()
 
 			removed++
 
@@ -192,7 +191,7 @@ func (s *Spec) AddTag(packageName string, tag string, value string) (err error) 
 
 	sectionName := ""
 	if packageName != "" {
-		sectionName = "%package"
+		sectionName = packageSectionName
 	}
 
 	return s.AppendLinesToSection(sectionName, packageName, []string{fmt.Sprintf("%s: %s", tag, value)})
@@ -291,7 +290,7 @@ func (s *Spec) InsertTag(packageName string, tag string, value string) error {
 
 	sectionName := ""
 	if packageName != "" {
-		sectionName = "%package"
+		sectionName = packageSectionName
 	}
 
 	return s.mutateTree(func(tree *specTree) error {
@@ -312,45 +311,16 @@ func (s *Spec) InsertTag(packageName string, tag string, value string) error {
 func (s *Spec) PrependLinesToSection(sectionName, packageName string, lines []string) (err error) {
 	slog.Debug("Prepending lines to spec", "section", sectionName, "package", packageName, "lines", lines)
 
-	var updated bool
-
-	err = s.Visit(func(ctx *Context) error {
-		// Make sure this is a section start.
-		if ctx.Target.TargetType != SectionStartTarget {
-			return nil
+	return s.mutateTree(func(tree *specTree) error {
+		sect := tree.Section(sectionName, packageName)
+		if sect == nil {
+			return fmt.Errorf("section %#q (package=%#q) not found:\n%w", sectionName, packageName, ErrSectionNotFound)
 		}
 
-		// Make sure section name matches.
-		if ctx.CurrentSection.SectName != sectionName {
-			return nil
-		}
-
-		// Make sure package name matches.
-		if ctx.CurrentSection.Package != packageName {
-			return nil
-		}
-
-		// Insert the lines. The global section doesn't have a header line, so we insert the
-		// lines *before* the start. For all other sections, including sub-package %package
-		// sections, we need to make sure we insert the lines after the header line of the
-		// section.
-		if ctx.CurrentSection.SectName == "" && ctx.CurrentSection.Package == "" {
-			ctx.InsertLinesBefore(lines)
-		} else {
-			ctx.InsertLinesAfter(lines)
-		}
-
-		// Note that we've made an update.
-		updated = true
+		sect.PrependLines(lines)
 
 		return nil
 	})
-
-	if !updated {
-		return fmt.Errorf("section %#q (package=%#q) not found:\n%w", sectionName, packageName, ErrSectionNotFound)
-	}
-
-	return err
 }
 
 // AppendLinesToSection appends the given lines at the end of the specified section, placing
@@ -391,38 +361,31 @@ func (s *Spec) SearchAndReplace(sectionName, packageName, regex, replacement str
 
 	var updated bool
 
-	err = s.Visit(func(ctx *Context) error {
-		// Make sure this is a section line.
-		if ctx.Target.TargetType != SectionLineTarget {
+	err = s.mutateTree(func(tree *specTree) error {
+		return tree.VisitAllLines(func(secName, secPkg string, line *lineHandle) error {
+			if sectionName != "" && secName != sectionName {
+				return nil
+			}
+
+			if packageName != "" && secPkg != packageName {
+				return nil
+			}
+
+			updatedLine := compiledRegex.ReplaceAllLiteralString(line.Text, replacement)
+			if updatedLine == line.Text {
+				return nil
+			}
+
+			line.Replace(updatedLine)
+
+			updated = true
+
 			return nil
-		}
-
-		// Make sure section name matches (or was omitted).
-		if sectionName != "" && ctx.CurrentSection.SectName != sectionName {
-			return nil
-		}
-
-		// Make sure package name matches (or was omitted).
-		if packageName != "" && ctx.CurrentSection.Package != packageName {
-			return nil
-		}
-
-		// Get the line.
-		line := ctx.Target.Line.Text
-
-		// Try to replace. If no replacements were made, return.
-		updatedLine := compiledRegex.ReplaceAllLiteralString(line, replacement)
-		if line == updatedLine {
-			return nil
-		}
-
-		ctx.ReplaceLine(updatedLine)
-
-		// Note that we've made an update.
-		updated = true
-
-		return nil
+		})
 	})
+	if err != nil {
+		return err
+	}
 
 	if !updated {
 		return fmt.Errorf(
@@ -431,7 +394,7 @@ func (s *Spec) SearchAndReplace(sectionName, packageName, regex, replacement str
 		)
 	}
 
-	return err
+	return nil
 }
 
 // AddChangelogEntry adds a changelog entry to the spec's changelog section. An error is returned if
@@ -440,42 +403,26 @@ func (s *Spec) AddChangelogEntry(user, email, version, release string, time time
 	slog.Debug("Adding changelog entry to spec",
 		"user", user, "email", email, "version", version, "release", release, "details", details)
 
-	var updated bool
+	formattedDate := time.Format("Mon Jan 02 2006")
+	header := fmt.Sprintf("* %s %s <%s> - %s-%s", formattedDate, user, email, version, release)
 
-	err = s.Visit(func(ctx *Context) error {
-		// Make sure we're in the right section.
-		if ctx.Target.TargetType != SectionStartTarget {
-			return nil
+	lines := []string{header}
+	for _, detail := range details {
+		lines = append(lines, "- "+detail)
+	}
+
+	lines = append(lines, "")
+
+	return s.mutateTree(func(tree *specTree) error {
+		sect := tree.Section("%changelog", "")
+		if sect == nil {
+			return errors.New("existing changelog section could not be found")
 		}
 
-		if ctx.CurrentSection.SectName != "%changelog" {
-			return nil
-		}
-
-		// Insert an entry.
-		formattedDate := time.Format("Mon Jan 02 2006")
-		header := fmt.Sprintf("* %s %s <%s> - %s-%s", formattedDate, user, email, version, release)
-
-		lines := []string{header}
-		for _, detail := range details {
-			lines = append(lines, "- "+detail)
-		}
-
-		lines = append(lines, "")
-
-		ctx.InsertLinesAfter(lines)
-
-		// Note that we've made an update.
-		updated = true
+		sect.PrependLines(lines)
 
 		return nil
 	})
-
-	if !updated {
-		return errors.New("existing changelog section could not be found")
-	}
-
-	return err
 }
 
 // ParsePatchTagNumber checks if the given tag name is a PatchN tag (case-insensitive)
@@ -574,12 +521,12 @@ func (s *Spec) removePatchTagsMatching(pattern string) (int, error) {
 	removed := 0
 
 	err := s.mutateTree(func(tree *specTree) error {
-		return tree.VisitAllLines(func(secName, _ string, lh *lineHandle) error {
+		return tree.VisitAllLines(func(secName, _ string, line *lineHandle) error {
 			if !isTagBearingSection(secName) {
 				return nil
 			}
 
-			parsedTag, parsedValue, isTag := parseTagLine(lh.Text)
+			parsedTag, parsedValue, isTag := parseTagLine(line.Text)
 			if !isTag {
 				return nil
 			}
@@ -594,7 +541,7 @@ func (s *Spec) removePatchTagsMatching(pattern string) (int, error) {
 			}
 
 			if matched {
-				lh.Remove()
+				line.Remove()
 
 				removed++
 			}
@@ -611,32 +558,31 @@ func (s *Spec) removePatchTagsMatching(pattern string) (int, error) {
 func (s *Spec) removePatchlistEntriesMatching(pattern string) (int, error) {
 	removed := 0
 
-	err := s.Visit(func(ctx *Context) error {
-		if ctx.Target.TargetType != SectionLineTarget {
+	err := s.mutateTree(func(tree *specTree) error {
+		sect := tree.Section("%patchlist", "")
+		if sect == nil {
 			return nil
 		}
 
-		if ctx.CurrentSection.SectName != "%patchlist" {
+		return sect.VisitLines(func(line *lineHandle) error {
+			trimmed := strings.TrimSpace(line.Text)
+			if trimmed == "" {
+				return nil
+			}
+
+			matched, matchErr := doublestar.Match(pattern, trimmed)
+			if matchErr != nil {
+				return fmt.Errorf("failed to match glob pattern %#q against %#q:\n%w", pattern, trimmed, matchErr)
+			}
+
+			if matched {
+				line.Remove()
+
+				removed++
+			}
+
 			return nil
-		}
-
-		line := strings.TrimSpace(ctx.Target.Line.Text)
-		if line == "" {
-			return nil
-		}
-
-		matched, err := doublestar.Match(pattern, line)
-		if err != nil {
-			return fmt.Errorf("failed to match glob pattern %#q against %#q:\n%w", pattern, line, err)
-		}
-
-		if matched {
-			ctx.RemoveLine()
-
-			removed++
-		}
-
-		return nil
+		})
 	})
 
 	return removed, err
@@ -652,12 +598,12 @@ func (s *Spec) GetHighestPatchTagNumber() (int, error) {
 	unnumberedCount := 0
 
 	err := s.inspectTree(func(tree *specTree) error {
-		return tree.VisitAllLines(func(secName, _ string, lh *lineHandle) error {
+		return tree.VisitAllLines(func(secName, _ string, line *lineHandle) error {
 			if !isTagBearingSection(secName) {
 				return nil
 			}
 
-			parsedTag, _, isTag := parseTagLine(lh.Text)
+			parsedTag, _, isTag := parseTagLine(line.Text)
 			if !isTag {
 				return nil
 			}
@@ -747,84 +693,6 @@ func (s *Spec) RemoveSubpackage(packageName string) error {
 	})
 }
 
-// sectionLineRange identifies a half-open `[start, end)` range of raw line numbers
-// covering one section, from its header line through (but not including) the start
-// of the next section.
-type sectionLineRange struct {
-	start int
-	end   int
-}
-
-// collectSectionRanges walks the spec and returns one [sectionLineRange] for every
-// section whose `(sectName, packageName)` pair satisfies the predicate, in the order
-// they appear in the spec.
-//
-// Each returned range is adjusted to maintain conditional balance: if a range would
-// include trailing `%if` or `%endif` lines that create a nesting imbalance, those
-// lines are trimmed from the range so that removing the range does not break the
-// spec's conditional structure. If a conditional block is interleaved with section
-// content in a way that cannot be resolved by trimming, an [ErrConditionalSpansSections]
-// error is returned.
-func (s *Spec) collectSectionRanges(
-	matches func(sectName, packageName string) bool,
-) ([]sectionLineRange, error) {
-	var (
-		ranges   []sectionLineRange
-		curStart = -1
-	)
-
-	err := s.Visit(func(ctx *Context) error {
-		matched := matches(ctx.CurrentSection.SectName, ctx.CurrentSection.Package)
-
-		//nolint:exhaustive // We intentionally only react to section boundaries.
-		switch ctx.Target.TargetType {
-		case SectionStartTarget:
-			if matched {
-				curStart = ctx.CurrentLineNum
-			}
-		case SectionEndTarget:
-			if matched && curStart >= 0 {
-				ranges = append(ranges, sectionLineRange{start: curStart, end: ctx.CurrentLineNum})
-				curStart = -1
-			}
-		}
-
-		return nil
-	})
-
-	// Defensive fallback: today [Spec.Visit] always emits a trailing SectionEndTarget at
-	// EOF, so this branch is unreachable. We keep it so that this helper does not silently
-	// misbehave if that invariant ever changes (a section running to EOF would otherwise
-	// be silently dropped from the result).
-	if curStart >= 0 {
-		ranges = append(ranges, sectionLineRange{start: curStart, end: len(s.rawLines)})
-	}
-
-	// Skip conditional balancing when no matching ranges were found, so callers
-	// get the expected empty-result / not-found behavior rather than a conditional
-	// parse error from an unrelated part of the spec.
-	if len(ranges) == 0 {
-		return ranges, err
-	}
-
-	// Balance each range to avoid breaking conditional nesting.
-	pairs, pairErr := collectConditionalPairs(s.rawLines)
-	if pairErr != nil {
-		return nil, fmt.Errorf("failed to parse conditional structure:\n%w", pairErr)
-	}
-
-	for idx := range ranges {
-		balanced, balanceErr := balanceRange(ranges[idx], s.rawLines, pairs)
-		if balanceErr != nil {
-			return nil, balanceErr
-		}
-
-		ranges[idx] = balanced
-	}
-
-	return ranges, err
-}
-
 // conditionalPair represents a matched `%if`/`%endif` pair by their line numbers.
 type conditionalPair struct {
 	ifLine    int
@@ -861,149 +729,4 @@ func collectConditionalPairs(rawLines []string) ([]conditionalPair, error) {
 	}
 
 	return pairs, nil
-}
-
-// balanceRange adjusts a section line range so that removing it does not leave
-// unbalanced `%if`/`%endif` directives in the spec. It uses pre-computed conditional
-// pairs to identify straddling conditionals — pairs where one half is inside the
-// range and the other half is outside.
-//
-// Straddling conditional lines inside the range are excluded (the range is trimmed
-// so they remain in the spec). This handles:
-//   - Trailing `%endif` from a wrapping conditional: excluded, leaving an empty
-//     `%if`/`%endif` wrapper.
-//   - Trailing `%if` belonging to the next section: excluded, keeping the next
-//     section's conditional intact.
-//   - Balanced pairs fully inside the range: removed along with the section content.
-//
-// If a straddling conditional is interleaved with real section content (not just
-// other conditional directives and blank lines), an [ErrConditionalSpansSections]
-// error is returned.
-func balanceRange(sectionRange sectionLineRange, rawLines []string, pairs []conditionalPair) (sectionLineRange, error) {
-	// Find the earliest straddling line inside the range and validate that no
-	// straddling %if has real content after it. A pair straddles if exactly one
-	// of its lines falls within [sectionRange.start, sectionRange.end).
-	trimmed := sectionRange.end
-
-	for _, pair := range pairs {
-		ifInside := pair.ifLine >= sectionRange.start && pair.ifLine < sectionRange.end
-		endifInside := pair.endifLine >= sectionRange.start && pair.endifLine < sectionRange.end
-
-		if ifInside == endifInside {
-			// Both inside (fully contained) or both outside (irrelevant).
-			continue
-		}
-
-		// Straddling: the line that's inside our range should be excluded.
-		var insideLine int
-		if ifInside {
-			insideLine = pair.ifLine
-		} else {
-			insideLine = pair.endifLine
-		}
-
-		if insideLine < trimmed {
-			trimmed = insideLine
-		}
-
-		// If the straddling line is an %if (opener inside, closer outside),
-		// check for real content between the %if and the range end. Such content
-		// would belong to this section but span into the next via the conditional.
-		if ifInside {
-			if err := validateNoContentAfter(pair.ifLine, sectionRange.end, rawLines); err != nil {
-				return sectionRange, fmt.Errorf(
-					"section at lines %d-%d has a conditional block that spans into the next section; "+
-						"use a spec-search-replace overlay to adjust conditionals before removing:\n%w",
-					sectionRange.start+1, sectionRange.end, ErrConditionalSpansSections,
-				)
-			}
-		}
-	}
-
-	// Check for %else/%elif branch directives that would be broken by the removal.
-	if err := validateNoBranchDirectivesInExternalConditional(sectionRange, rawLines, pairs); err != nil {
-		return sectionRange, err
-	}
-
-	if trimmed == sectionRange.end {
-		// No straddling pairs — range is already balanced.
-		return sectionRange, nil
-	}
-
-	// Validate: the trimmed zone [trimmed, sectionRange.end) will remain in the spec.
-	// If it contains real section content (not just conditional directives and blanks),
-	// we'd be leaving behind part of the section the caller asked to remove.
-	if err := validateNoContentAfter(trimmed-1, sectionRange.end, rawLines); err != nil {
-		return sectionRange, fmt.Errorf(
-			"section at lines %d-%d has a conditional block that spans into the next section; "+
-				"use a spec-search-replace overlay to adjust conditionals before removing:\n%w",
-			sectionRange.start+1, sectionRange.end, ErrConditionalSpansSections,
-		)
-	}
-
-	return sectionLineRange{start: sectionRange.start, end: trimmed}, nil
-}
-
-// validateNoContentAfter checks that there is no real section content (non-blank,
-// non-conditional lines) between startLine and endLine. Returns an error if any
-// such content is found.
-func validateNoContentAfter(startLine, endLine int, rawLines []string) error {
-	for lineNum := startLine + 1; lineNum < endLine; lineNum++ {
-		if !isBlankOrComment(rawLines[lineNum]) && conditionalDepthChange(rawLines[lineNum]) == 0 {
-			return fmt.Errorf("real content found at line %d", lineNum+1)
-		}
-	}
-
-	return nil
-}
-
-// validateNoBranchDirectivesInExternalConditional checks that the section range
-// does not contain any `%else`/`%elif` branch directives whose enclosing
-// `%if`/`%endif` pair extends beyond the range. Removing such a branch directive
-// while keeping the enclosing conditional would change which branch is active.
-func validateNoBranchDirectivesInExternalConditional(
-	sectionRange sectionLineRange,
-	rawLines []string,
-	pairs []conditionalPair,
-) error {
-	for lineNum := sectionRange.start; lineNum < sectionRange.end; lineNum++ {
-		if !isConditionalBranchDirective(rawLines[lineNum]) {
-			continue
-		}
-
-		for _, pair := range pairs {
-			if pair.ifLine <= lineNum && pair.endifLine >= lineNum {
-				pairFullyInside := pair.ifLine >= sectionRange.start && pair.endifLine < sectionRange.end
-
-				if !pairFullyInside {
-					return fmt.Errorf(
-						"section at lines %d-%d contains a %%else/%%elif branch directive inside a "+
-							"conditional block that extends beyond the section boundary; "+
-							"use a spec-search-replace overlay to adjust conditionals before removing:\n%w",
-						sectionRange.start+1, sectionRange.end, ErrConditionalSpansSections,
-					)
-				}
-
-				break
-			}
-		}
-	}
-
-	return nil
-}
-
-// isBlankOrComment returns true if the line is empty, whitespace-only, or a comment.
-func isBlankOrComment(line string) bool {
-	trimmed := strings.TrimSpace(line)
-
-	return trimmed == "" || strings.HasPrefix(trimmed, "#")
-}
-
-// removeRanges deletes the given line ranges from the spec. Ranges must be
-// non-overlapping and in ascending order (as produced by [Spec.collectSectionRanges]);
-// they are removed from last to first so earlier indices remain valid.
-func (s *Spec) removeRanges(ranges []sectionLineRange) {
-	for i := len(ranges) - 1; i >= 0; i-- {
-		s.RemoveLines(ranges[i].start, ranges[i].end)
-	}
 }

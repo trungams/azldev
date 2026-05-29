@@ -240,6 +240,7 @@ func buildBlockChildren(
 	inCont := false
 
 	var textBuf []string
+
 	flushText := func() {
 		if len(textBuf) > 0 {
 			parent.Children = append(parent.Children, &block{
@@ -745,8 +746,9 @@ func validateRemovalInChildren(children []*block, removeSet map[*block]bool) err
 		if hasTextOrMacroContent(child.Children) && containsSectionBlocks(child) {
 			preceding := findPrecedingSection(children, i)
 			if preceding != nil && removeSet[preceding] {
-				return fmt.Errorf("conditional block spans across sections: %%if block at %q "+
-					"contains content belonging to the preceding section", child.Header)
+				return fmt.Errorf("%%if block at %q "+
+					"contains content belonging to the preceding section:\n%w",
+					child.Header, ErrConditionalSpansSections)
 			}
 		}
 
@@ -756,8 +758,9 @@ func validateRemovalInChildren(children []*block, removeSet map[*block]bool) err
 		if wouldEmptyWrapper(child, removeSet) && i+1 < len(children) {
 			next := children[i+1]
 			if next.Kind == conditionalBlock && !containsSectionBlocks(next) && hasTextOrMacroContent(next.Children) {
-				return fmt.Errorf("conditional block spans across sections: content in %%if block at %q "+
-					"would be orphaned after removing the preceding section", next.Header)
+				return fmt.Errorf("content in %%if block at %q "+
+					"would be orphaned after removing the preceding section:\n%w",
+					next.Header, ErrConditionalSpansSections)
 			}
 		}
 
@@ -800,13 +803,15 @@ func validateConditionalRemoval(cond *block, removeSet map[*block]bool) error {
 	// This indicates content that semantically belongs to a preceding section
 	// but appears inside a wrapper conditional before the section header.
 	if thenHasRemovedSections && hasTextOrMacroContent(cond.Children) {
-		return fmt.Errorf("conditional block spans across sections: %%if block at %q "+
-			"contains content that would be orphaned", cond.Header)
+		return fmt.Errorf("%%if block at %q "+
+			"contains content that would be orphaned:\n%w",
+			cond.Header, ErrConditionalSpansSections)
 	}
 
 	if elseHasRemovedSections && hasTextOrMacroContent(cond.Else) {
-		return fmt.Errorf("conditional block spans across sections: %%else block at %q "+
-			"contains content that would be orphaned", cond.Header)
+		return fmt.Errorf("%%else block at %q "+
+			"contains content that would be orphaned:\n%w",
+			cond.Header, ErrConditionalSpansSections)
 	}
 
 	// Check 2: removing sections from one branch while the other branch

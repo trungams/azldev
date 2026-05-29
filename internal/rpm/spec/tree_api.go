@@ -72,19 +72,19 @@ func (t *specTree) HasSection(name string) bool {
 	return hasSectionWithName(t.root, name)
 }
 
-func hasSectionWithName(b *block, name string) bool {
-	if b.Kind == sectionBlock && b.Name == name {
+func hasSectionWithName(blk *block, name string) bool {
+	if blk.Kind == sectionBlock && blk.Name == name {
 		return true
 	}
 
-	for _, child := range b.Children {
+	for _, child := range blk.Children {
 		if hasSectionWithName(child, name) {
 			return true
 		}
 	}
 
-	if b.Kind == conditionalBlock {
-		for _, child := range b.Else {
+	if blk.Kind == conditionalBlock {
+		for _, child := range blk.Else {
 			if hasSectionWithName(child, name) {
 				return true
 			}
@@ -225,48 +225,50 @@ func (h *sectionHandle) VisitLines(visit func(lh *lineHandle) error) error {
 	return visitErr
 }
 
-// collectAndVisitLines walks b, calls visit on every text-line, and records
+// collectAndVisitLines walks blk, calls visit on every text-line, and records
 // each handle for later mutation flushing.
+//
+//nolint:cyclop // Switch over blockKind with a small recursive call per kind; splitting hurts readability.
 func collectAndVisitLines(
-	b *block,
+	blk *block,
 	secName, secPkg string,
 	visit func(string, string, *lineHandle) error,
 	handles *[]*lineHandle,
 ) error {
-	switch b.Kind {
+	switch blk.Kind {
 	case rootBlock:
-		for _, child := range b.Children {
+		for _, child := range blk.Children {
 			if err := collectAndVisitLines(child, secName, secPkg, visit, handles); err != nil {
 				return err
 			}
 		}
 
 	case sectionBlock:
-		for _, child := range b.Children {
-			if err := collectAndVisitLines(child, b.Name, b.Package, visit, handles); err != nil {
+		for _, child := range blk.Children {
+			if err := collectAndVisitLines(child, blk.Name, blk.Package, visit, handles); err != nil {
 				return err
 			}
 		}
 
 	case conditionalBlock:
-		for _, child := range b.Children {
+		for _, child := range blk.Children {
 			if err := collectAndVisitLines(child, secName, secPkg, visit, handles); err != nil {
 				return err
 			}
 		}
 
-		for _, child := range b.Else {
+		for _, child := range blk.Else {
 			if err := collectAndVisitLines(child, secName, secPkg, visit, handles); err != nil {
 				return err
 			}
 		}
 
 	case textBlock:
-		for i, line := range b.Lines {
-			lh := &lineHandle{Text: line, block: b, idx: i}
-			*handles = append(*handles, lh)
+		for i, line := range blk.Lines {
+			handle := &lineHandle{Text: line, block: blk, idx: i}
+			*handles = append(*handles, handle)
 
-			if err := visit(secName, secPkg, lh); err != nil {
+			if err := visit(secName, secPkg, handle); err != nil {
 				return err
 			}
 		}
@@ -283,13 +285,13 @@ func collectAndVisitLines(
 // invalidate the indices of yet-to-be-applied operations.
 func flushLineMutations(handles []*lineHandle) {
 	for i := len(handles) - 1; i >= 0; i-- {
-		h := handles[i]
+		handle := handles[i]
 
 		switch {
-		case h.removed:
-			h.block.Lines = append(h.block.Lines[:h.idx], h.block.Lines[h.idx+1:]...)
-		case h.replaced:
-			h.block.Lines[h.idx] = h.newText
+		case handle.removed:
+			handle.block.Lines = append(handle.block.Lines[:handle.idx], handle.block.Lines[handle.idx+1:]...)
+		case handle.replaced:
+			handle.block.Lines[handle.idx] = handle.newText
 		}
 	}
 }
@@ -433,10 +435,10 @@ func scanConditionalForTags(cond *block, family string) (hasAny, hasFamily bool)
 	return hasAny, hasFamily
 }
 
-func scanForTags(b *block, family string) (hasAny, hasFamily bool) {
-	switch b.Kind {
+func scanForTags(blk *block, family string) (hasAny, hasFamily bool) {
+	switch blk.Kind {
 	case textBlock:
-		for _, line := range b.Lines {
+		for _, line := range blk.Lines {
 			tag, _, isTag := parseTagLine(line)
 			if !isTag {
 				continue
@@ -450,7 +452,7 @@ func scanForTags(b *block, family string) (hasAny, hasFamily bool) {
 		}
 
 	case conditionalBlock:
-		return scanConditionalForTags(b, family)
+		return scanConditionalForTags(blk, family)
 
 	case rootBlock, sectionBlock, macroDefBlock:
 		// Not searched for tags here.
@@ -472,12 +474,18 @@ func parseTagLine(line string) (tag, value string, ok bool) {
 	return matches[1], matches[2], true
 }
 
+// packageSectionName is the canonical section name for sub-package definitions
+// (the `%package <name>` directive). The preamble (empty section name) and these
+// sections are the only places where tag-style lines (`Foo: bar`) carry semantic
+// meaning; script-style sections such as `%build` may contain lines that match
+// the tag regex but are not actually tags.
+const packageSectionName = "%package"
+
 // isTagBearingSection reports whether a section keyword can legally hold RPM
 // tag declarations (e.g. "Name:", "Source0:"). Only the preamble (empty name)
 // and "%package" sections qualify. Script-style sections like "%build" may
 // contain shell that happens to match the "word: word" pattern; we must avoid
 // treating those as tags.
 func isTagBearingSection(secName string) bool {
-	return secName == "" || secName == "%package"
+	return secName == "" || secName == packageSectionName
 }
-
