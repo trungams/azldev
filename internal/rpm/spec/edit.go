@@ -348,6 +348,11 @@ func (s *Spec) AppendLinesToSection(sectionName, packageName string, lines []str
 // section. If `sectionName` is empty, the operation acts against all sections. If no matches were
 // found to replace, an error is returned. The replacement is performed literally; regex capture
 // group references like $1 are not expanded.
+//
+// Unlike [specTree.VisitAllLines] (which skips structural lines), this function
+// walks every line in the tree including macro definitions (%define/%global) and
+// conditional directives (%if/%else/%endif), so patterns that match those lines
+// are found correctly.
 func (s *Spec) SearchAndReplace(sectionName, packageName, regex, replacement string) (err error) {
 	slog.Debug("Searching and replacing in spec",
 		"section", sectionName,
@@ -362,26 +367,9 @@ func (s *Spec) SearchAndReplace(sectionName, packageName, regex, replacement str
 	var updated bool
 
 	err = s.mutateTree(func(tree *specTree) error {
-		return tree.VisitAllLines(func(secName, secPkg string, line *lineHandle) error {
-			if sectionName != "" && secName != sectionName {
-				return nil
-			}
+		updated = searchReplaceBlock(tree.root, "", "", sectionName, packageName, compiledRegex, replacement)
 
-			if packageName != "" && secPkg != packageName {
-				return nil
-			}
-
-			updatedLine := compiledRegex.ReplaceAllLiteralString(line.Text, replacement)
-			if updatedLine == line.Text {
-				return nil
-			}
-
-			line.Replace(updatedLine)
-
-			updated = true
-
-			return nil
-		})
+		return nil
 	})
 	if err != nil {
 		return err
@@ -395,6 +383,107 @@ func (s *Spec) SearchAndReplace(sectionName, packageName, regex, replacement str
 	}
 
 	return nil
+}
+
+// searchReplaceBlock recursively walks a [block] tree, applying regex replacement
+// to every line including macro definitions and conditional directives. Returns
+// true if any replacement was made.
+//
+//nolint:cyclop,gocognit,funlen // Switch over blockKind with recursive calls; splitting would hurt readability.
+func searchReplaceBlock(
+	blk *block,
+	secName, secPkg string,
+	filterSection, filterPkg string,
+	compiledRegex *regexp.Regexp,
+	replacement string,
+) bool {
+	updated := false
+
+	matchesFilter := (filterSection == "" || filterSection == secName) &&
+		(filterPkg == "" || filterPkg == secPkg)
+
+	switch blk.Kind {
+	case rootBlock:
+		for _, child := range blk.Children {
+			if searchReplaceBlock(child, secName, secPkg, filterSection, filterPkg, compiledRegex, replacement) {
+				updated = true
+			}
+		}
+
+	case sectionBlock:
+		// Section header itself is not subject to search-replace; content is.
+		for _, child := range blk.Children {
+			if searchReplaceBlock(child, blk.Name, blk.Package, filterSection, filterPkg, compiledRegex, replacement) {
+				updated = true
+			}
+		}
+
+	case conditionalBlock:
+		// Replace in the %if header line.
+		if matchesFilter {
+			if newHeader := compiledRegex.ReplaceAllLiteralString(blk.Header, replacement); newHeader != blk.Header {
+				blk.Header = newHeader
+				updated = true
+			}
+		}
+
+		// Check if this is a wrapper (contains section headers). If so, the
+		// else branch's content has ambiguous section context — the section
+		// established before the wrapper may continue in the else branch
+		// (common RPM spec pattern). Relax the section filter for the else
+		// branch text that has no enclosing section.
+		isWrapper := containsSectionBlocks(blk)
+
+		// Then-branch children.
+		for _, child := range blk.Children {
+			if searchReplaceBlock(child, secName, secPkg, filterSection, filterPkg, compiledRegex, replacement) {
+				updated = true
+			}
+		}
+
+		// %else/%elif directive line.
+		if matchesFilter && blk.ElseDirective != "" {
+			if newDir := compiledRegex.ReplaceAllLiteralString(blk.ElseDirective, replacement); newDir != blk.ElseDirective {
+				blk.ElseDirective = newDir
+				updated = true
+			}
+		}
+
+		// Else-branch children. For wrapper conditionals, relax the section
+		// filter on loose content (text/macros not inside a section block)
+		// so that content belonging to the preceding section is reachable.
+		for _, child := range blk.Else {
+			elseSec, elsePkg := secName, secPkg
+			if isWrapper && child.Kind != sectionBlock {
+				elseSec = filterSection
+				elsePkg = filterPkg
+			}
+
+			if searchReplaceBlock(child, elseSec, elsePkg, filterSection, filterPkg, compiledRegex, replacement) {
+				updated = true
+			}
+		}
+
+		// %endif line.
+		if matchesFilter && blk.Endif != "" {
+			if newEndif := compiledRegex.ReplaceAllLiteralString(blk.Endif, replacement); newEndif != blk.Endif {
+				blk.Endif = newEndif
+				updated = true
+			}
+		}
+
+	case textBlock, macroDefBlock:
+		if matchesFilter {
+			for i, line := range blk.Lines {
+				if newLine := compiledRegex.ReplaceAllLiteralString(line, replacement); newLine != line {
+					blk.Lines[i] = newLine
+					updated = true
+				}
+			}
+		}
+	}
+
+	return updated
 }
 
 // AddChangelogEntry adds a changelog entry to the spec's changelog section. An error is returned if

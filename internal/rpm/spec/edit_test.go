@@ -871,6 +871,116 @@ func TestSearchAndReplace(t *testing.T) {
 
 		require.Equal(t, expected, actual.String())
 	})
+
+	t.Run("replace in macro definition", func(t *testing.T) {
+		input := `
+%global with_doc 1
+Name: test
+
+%build
+make
+`
+
+		specFile, err := spec.OpenSpec(strings.NewReader(input))
+		require.NoError(t, err)
+
+		expected := strings.ReplaceAll(input, "%global with_doc 1", "%global with_doc 0")
+
+		err = specFile.SearchAndReplace("", "", `%global with_doc 1`, "%global with_doc 0")
+		require.NoError(t, err)
+
+		actual := new(bytes.Buffer)
+
+		err = specFile.Serialize(actual)
+		require.NoError(t, err)
+
+		require.Equal(t, expected, actual.String())
+	})
+
+	t.Run("replace in conditional header", func(t *testing.T) {
+		input := `
+Name: test
+
+%if 0%{?fedora}
+BuildRequires: fedora-only
+%endif
+
+%build
+make
+`
+
+		specFile, err := spec.OpenSpec(strings.NewReader(input))
+		require.NoError(t, err)
+
+		expected := strings.ReplaceAll(input, "%if 0%{?fedora}", "%if 0%{?rhel}")
+
+		err = specFile.SearchAndReplace("", "", `^%if 0%\{\?fedora\}$`, "%if 0%{?rhel}")
+		require.NoError(t, err)
+
+		actual := new(bytes.Buffer)
+
+		err = specFile.Serialize(actual)
+		require.NoError(t, err)
+
+		require.Equal(t, expected, actual.String())
+	})
+
+	t.Run("replace in multi-line macro definition", func(t *testing.T) {
+		input := `
+%global cfg_content --gcc-triple=%{_target_cpu}-redhat-linux \
+  --extra-flag=old
+Name: test
+
+%build
+make
+`
+
+		specFile, err := spec.OpenSpec(strings.NewReader(input))
+		require.NoError(t, err)
+
+		expected := strings.ReplaceAll(input, "redhat-linux", "azl-linux")
+
+		err = specFile.SearchAndReplace("", "", `redhat-linux`, "azl-linux")
+		require.NoError(t, err)
+
+		actual := new(bytes.Buffer)
+
+		err = specFile.Serialize(actual)
+		require.NoError(t, err)
+
+		require.Equal(t, expected, actual.String())
+	})
+
+	t.Run("replace in wrapper else branch with section filter", func(t *testing.T) {
+		input := `
+Name: test
+
+%files
+/usr/bin/test
+
+%ifarch x86_64
+%files nonlinux
+%{_datadir}/syslinux/*.exe
+%else
+%exclude %{_datadir}/syslinux/*.exe
+%endif
+`
+
+		specFile, err := spec.OpenSpec(strings.NewReader(input))
+		require.NoError(t, err)
+
+		expected := strings.ReplaceAll(input, "%exclude %{_datadir}/syslinux/*.exe", "")
+
+		err = specFile.SearchAndReplace("%files", "", `^%exclude %\{_datadir\}/syslinux/\*\.exe$`, "")
+		require.NoError(t, err)
+
+		actual := new(bytes.Buffer)
+
+		err = specFile.Serialize(actual)
+		require.NoError(t, err)
+
+		require.Equal(t, expected, actual.String())
+	})
 }
 
 func TestAddChangelogEntry(t *testing.T) {
