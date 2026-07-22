@@ -117,6 +117,11 @@ func (f ConfigFile) Validate() error {
 			}
 		}
 
+		// Validate customization configurations for each component.
+		if err := validateCustomizations(component.Customizations, componentName); err != nil {
+			return err
+		}
+
 		// Validate build configuration.
 		err := component.Build.Validate()
 		if err != nil {
@@ -178,6 +183,16 @@ func validateComponentGroupMetadata(groups map[string]ComponentGroupConfig) erro
 //   - Origin must be present and valid for each source file.
 //   - 'replace-upstream' and 'replace-reason' must be set together.
 //   - [OriginTypeOverlay] entries additionally require 'hash', 'hash-type', and 'replace-upstream = true'.
+func validateCustomizations(customizations []ComponentCustomization, componentName string) error {
+	for i, customization := range customizations {
+		if err := customization.Validate(); err != nil {
+			return fmt.Errorf("invalid customization %d for component %#q:\n%w", i+1, componentName, err)
+		}
+	}
+
+	return nil
+}
+
 func validateSourceFiles(sourceFiles []SourceFileReference, componentName string) error {
 	seen := make(map[string]bool, len(sourceFiles))
 

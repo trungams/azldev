@@ -251,7 +251,7 @@ func (p *sourcePreparerImpl) PrepareSources(
 	fingerprintConfig := component.GetConfig()
 
 	if applyOverlays {
-		repackedArchives, err := p.applyOverlaysToSources(component, outputDir)
+		repackedArchives, err := p.applyOverlaysToSources(ctx, component, outputDir)
 		if err != nil {
 			return err
 		}
@@ -292,7 +292,7 @@ func (p *sourcePreparerImpl) validateArchiveOverlayConfig(component components.C
 // (empty in dry-run mode or when no archive overlays ran), so the caller can
 // rehash exactly those entries in the 'sources' file.
 func (p *sourcePreparerImpl) applyOverlaysToSources(
-	component components.Component, outputDir string,
+	ctx context.Context, component components.Component, outputDir string,
 ) ([]string, error) {
 	var macrosFileName string
 
@@ -310,6 +310,17 @@ func (p *sourcePreparerImpl) applyOverlaysToSources(
 	if err != nil {
 		return nil, fmt.Errorf("failed to apply overlays for component %#q:\n%w",
 			component.GetName(), err)
+	}
+
+	// Apply declarative customizations after overlays, operating on the same in-tree spec that
+	// overlays just modified. Customizations shell out to the rpm-spec-customize tool.
+	absSpecPath, err := p.resolveSpecPath(component, outputDir)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := p.applyCustomizations(ctx, component, absSpecPath); err != nil {
+		return nil, fmt.Errorf("failed to apply customizations for component %#q:\n%w", component.GetName(), err)
 	}
 
 	return repackedArchives, nil
@@ -664,7 +675,7 @@ func (p *sourcePreparerImpl) DiffSources(
 	// Apply overlays in-place to the copied directory only. The repacked-archive
 	// list is unused here: DiffSources diffs the trees directly and does not
 	// rewrite a 'sources' file.
-	if _, err := p.applyOverlaysToSources(component, overlaidDir); err != nil {
+	if _, err := p.applyOverlaysToSources(ctx, component, overlaidDir); err != nil {
 		return nil, fmt.Errorf("failed to apply overlays for component %#q:\n%w", component.GetName(), err)
 	}
 

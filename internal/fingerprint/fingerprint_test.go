@@ -164,6 +164,27 @@ func TestComputeIdentity_CheckSkipChange(t *testing.T) {
 	assert.NotEqual(t, fp1, fp2, "changing check.skip must change fingerprint")
 }
 
+func TestComputeIdentity_CustomizationsChange(t *testing.T) {
+	ctx := newTestFS(t, map[string]string{
+		"/specs/test.spec": "Name: testpkg\nVersion: 1.0",
+	})
+
+	enabled := false
+
+	comp1 := baseComponent()
+	comp2 := baseComponent()
+	comp2.Customizations = []projectconfig.ComponentCustomization{
+		{Type: projectconfig.ComponentCustomizeBuildOption, Option: "mingw", Enabled: &enabled},
+	}
+
+	releaseVer := testReleaseVer
+
+	fp1 := computeFingerprint(t, ctx, comp1, releaseVer, 0)
+	fp2 := computeFingerprint(t, ctx, comp2, releaseVer, 0)
+
+	assert.NotEqual(t, fp1, fp2, "adding customizations must change fingerprint")
+}
+
 func TestComputeIdentity_ExcludedFieldsDoNotChange(t *testing.T) {
 	ctx := newTestFS(t, map[string]string{
 		"/specs/test.spec": "Name: testpkg\nVersion: 1.0",
