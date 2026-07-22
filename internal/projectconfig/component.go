@@ -516,7 +516,8 @@ func (c *ComponentConfig) WithAbsolutePaths(referenceDir string) *ComponentConfi
 		// OverlayFiles is consumed after component config resolution; preserve it verbatim
 		// here so inherited patterns can be interpreted relative to the concrete component
 		// config file.
-		OverlayFiles: slices.Clone(c.OverlayFiles),
+		OverlayFiles:   slices.Clone(c.OverlayFiles),
+		Customizations: deep.MustCopy(c.Customizations),
 	}
 
 	// Fix up paths.
