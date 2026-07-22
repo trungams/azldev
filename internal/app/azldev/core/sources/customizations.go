@@ -93,6 +93,21 @@ func buildCustomizationsDoc(customizations []projectconfig.ComponentCustomizatio
 				"kind":    "remove-subpackage",
 				"package": customization.Package,
 			})
+		case projectconfig.ComponentCustomizeBuildSystem:
+			options := make([]map[string]any, 0, len(customization.BuildOptions))
+			for _, opt := range customization.BuildOptions {
+				options = append(options, map[string]any{
+					"phase": opt.Phase,
+					"args":  opt.Args,
+				})
+			}
+
+			entries = append(entries, map[string]any{
+				"kind":       "build-system",
+				"system":     customization.System,
+				"options":    options,
+				"drop_check": customization.DropCheck,
+			})
 		default:
 			return nil, fmt.Errorf("unknown customization type %#q", customization.Type)
 		}

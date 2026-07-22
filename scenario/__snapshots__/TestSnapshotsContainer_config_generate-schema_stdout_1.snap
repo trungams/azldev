@@ -169,7 +169,8 @@
           "enum": [
             "customize-build-option",
             "customize-tests",
-            "customize-remove-subpackage"
+            "customize-remove-subpackage",
+            "customize-build-system"
           ],
           "title": "Customization type",
           "description": "The type of customization to apply"
@@ -193,6 +194,24 @@
           "type": "boolean",
           "title": "Enabled",
           "description": "For customize-build-option and customize-tests"
+        },
+        "system": {
+          "type": "string",
+          "title": "Build system",
+          "description": "For customize-build-system"
+        },
+        "build-options": {
+          "items": {
+            "$ref": "#/$defs/CustomizationBuildOption"
+          },
+          "type": "array",
+          "title": "Build options",
+          "description": "For customize-build-system"
+        },
+        "drop-check": {
+          "type": "boolean",
+          "title": "Drop check",
+          "description": "For customize-build-system"
         }
       },
       "additionalProperties": false,
@@ -454,6 +473,25 @@
       },
       "additionalProperties": false,
       "type": "object"
+    },
+    "CustomizationBuildOption": {
+      "properties": {
+        "phase": {
+          "type": "string",
+          "title": "Phase",
+          "description": "The build phase the option applies to (defaults to conf)"
+        },
+        "args": {
+          "type": "string",
+          "title": "Args",
+          "description": "The argument string to pass to the build phase"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "args"
+      ]
     },
     "DistroDefinition": {
       "properties": {
