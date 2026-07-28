@@ -20,9 +20,9 @@ func TestComponentCustomization_Validate(t *testing.T) {
 		errorExpected bool
 		errorContains string
 	}{
-		// customize-build-option tests
+		// build-option tests
 		{
-			name: "customize-build-option valid enabled",
+			name: "build-option valid enabled",
 			customization: projectconfig.ComponentCustomization{
 				Type:    projectconfig.ComponentCustomizeBuildOption,
 				Option:  "mingw",
@@ -31,7 +31,7 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorExpected: false,
 		},
 		{
-			name: "customize-build-option valid disabled",
+			name: "build-option valid disabled",
 			customization: projectconfig.ComponentCustomization{
 				Type:    projectconfig.ComponentCustomizeBuildOption,
 				Option:  "mingw",
@@ -40,7 +40,7 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorExpected: false,
 		},
 		{
-			name: "customize-build-option missing option",
+			name: "build-option missing option",
 			customization: projectconfig.ComponentCustomization{
 				Type:    projectconfig.ComponentCustomizeBuildOption,
 				Enabled: boolPtr(true),
@@ -49,7 +49,7 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorContains: "option",
 		},
 		{
-			name: "customize-build-option missing enabled",
+			name: "build-option missing enabled",
 			customization: projectconfig.ComponentCustomization{
 				Type:   projectconfig.ComponentCustomizeBuildOption,
 				Option: "mingw",
@@ -57,9 +57,9 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorExpected: true,
 			errorContains: "enabled",
 		},
-		// customize-tests tests
+		// tests
 		{
-			name: "customize-tests valid enabled",
+			name: "tests valid enabled",
 			customization: projectconfig.ComponentCustomization{
 				Type:    projectconfig.ComponentCustomizeTests,
 				Enabled: boolPtr(true),
@@ -67,7 +67,7 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorExpected: false,
 		},
 		{
-			name: "customize-tests valid disabled",
+			name: "tests valid disabled",
 			customization: projectconfig.ComponentCustomization{
 				Type:    projectconfig.ComponentCustomizeTests,
 				Enabled: boolPtr(false),
@@ -75,16 +75,16 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorExpected: false,
 		},
 		{
-			name: "customize-tests missing enabled",
+			name: "tests missing enabled",
 			customization: projectconfig.ComponentCustomization{
 				Type: projectconfig.ComponentCustomizeTests,
 			},
 			errorExpected: true,
 			errorContains: "enabled",
 		},
-		// customize-remove-subpackage tests
+		// remove-subpackage tests
 		{
-			name: "customize-remove-subpackage valid",
+			name: "remove-subpackage valid",
 			customization: projectconfig.ComponentCustomization{
 				Type:    projectconfig.ComponentCustomizeRemoveSubpackage,
 				Package: "doc",
@@ -92,16 +92,16 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorExpected: false,
 		},
 		{
-			name: "customize-remove-subpackage missing package",
+			name: "remove-subpackage missing package",
 			customization: projectconfig.ComponentCustomization{
 				Type: projectconfig.ComponentCustomizeRemoveSubpackage,
 			},
 			errorExpected: true,
 			errorContains: "package",
 		},
-		// customize-dependency tests
+		// dependency tests
 		{
-			name: "customize-dependency valid set-constraint relax",
+			name: "dependency valid set-constraint relax",
 			customization: projectconfig.ComponentCustomization{
 				Type:         projectconfig.ComponentCustomizeDependency,
 				Relationship: "buildrequires",
@@ -112,7 +112,7 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorExpected: false,
 		},
 		{
-			name: "customize-dependency valid add",
+			name: "dependency valid add",
 			customization: projectconfig.ComponentCustomization{
 				Type:         projectconfig.ComponentCustomizeDependency,
 				Relationship: "requires",
@@ -124,7 +124,7 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorExpected: false,
 		},
 		{
-			name: "customize-dependency valid remove",
+			name: "dependency valid remove",
 			customization: projectconfig.ComponentCustomization{
 				Type:         projectconfig.ComponentCustomizeDependency,
 				Relationship: "requires",
@@ -134,7 +134,7 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorExpected: false,
 		},
 		{
-			name: "customize-dependency missing relationship",
+			name: "dependency missing relationship",
 			customization: projectconfig.ComponentCustomization{
 				Type:   projectconfig.ComponentCustomizeDependency,
 				Action: "remove",
@@ -144,7 +144,7 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorContains: "relationship",
 		},
 		{
-			name: "customize-dependency missing name",
+			name: "dependency missing name",
 			customization: projectconfig.ComponentCustomization{
 				Type:         projectconfig.ComponentCustomizeDependency,
 				Relationship: "requires",
@@ -154,7 +154,7 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorContains: "name",
 		},
 		{
-			name: "customize-dependency invalid action",
+			name: "dependency invalid action",
 			customization: projectconfig.ComponentCustomization{
 				Type:         projectconfig.ComponentCustomizeDependency,
 				Relationship: "requires",
@@ -165,7 +165,7 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorContains: "invalid action",
 		},
 		{
-			name: "customize-dependency set-constraint without op or version",
+			name: "dependency set-constraint without op or version",
 			customization: projectconfig.ComponentCustomization{
 				Type:         projectconfig.ComponentCustomizeDependency,
 				Relationship: "buildrequires",
@@ -179,7 +179,7 @@ func TestComponentCustomization_Validate(t *testing.T) {
 		{
 			name: "unknown customization type",
 			customization: projectconfig.ComponentCustomization{
-				Type: "customize-bogus",
+				Type: "bogus",
 			},
 			errorExpected: true,
 			errorContains: "unknown customization type",

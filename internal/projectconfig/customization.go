@@ -11,17 +11,17 @@ type ComponentCustomizationType string
 const (
 	// ComponentCustomizeBuildOption enables or disables a named build option (e.g. a
 	// %bcond_with/%bcond_without toggle) in the spec.
-	ComponentCustomizeBuildOption ComponentCustomizationType = "customize-build-option"
+	ComponentCustomizeBuildOption ComponentCustomizationType = "build-option"
 	// ComponentCustomizeTests enables or disables the spec's test suite (its %check section).
-	ComponentCustomizeTests ComponentCustomizationType = "customize-tests"
+	ComponentCustomizeTests ComponentCustomizationType = "tests"
 	// ComponentCustomizeRemoveSubpackage removes a named sub-package from the spec.
-	ComponentCustomizeRemoveSubpackage ComponentCustomizationType = "customize-remove-subpackage"
+	ComponentCustomizeRemoveSubpackage ComponentCustomizationType = "remove-subpackage"
 	// ComponentCustomizeBuildSystem onboards the spec to a declarative RPM build system
 	// (rpm >= 4.20) by setting the BuildSystem tag and removing the redundant build phases.
-	ComponentCustomizeBuildSystem ComponentCustomizationType = "customize-build-system"
+	ComponentCustomizeBuildSystem ComponentCustomizationType = "build-system"
 	// ComponentCustomizeDependency adds, removes, or re-constrains a dependency relationship
 	// (Requires/BuildRequires/Conflicts/Recommends) on the main package.
-	ComponentCustomizeDependency ComponentCustomizationType = "customize-dependency"
+	ComponentCustomizeDependency ComponentCustomizationType = "dependency"
 )
 
 // CustomizationBuildOption is a single BuildOption(<phase>) argument passed to a declarative
@@ -39,34 +39,34 @@ type CustomizationBuildOption struct {
 // toggling a build option, enabling/disabling tests, or removing a sub-package.
 type ComponentCustomization struct {
 	// The type of customization to apply.
-	Type ComponentCustomizationType `toml:"type" json:"type" validate:"required" jsonschema:"enum=customize-build-option,enum=customize-tests,enum=customize-remove-subpackage,enum=customize-build-system,enum=customize-dependency,title=Customization type,description=The type of customization to apply"`
+	Type ComponentCustomizationType `toml:"type" json:"type" validate:"required" jsonschema:"enum=build-option,enum=tests,enum=remove-subpackage,enum=build-system,enum=dependency,title=Customization type,description=The type of customization to apply"`
 	// Human readable description of customization; primarily present to document the need for the change.
 	Description string `toml:"description,omitempty" json:"description,omitempty" jsonschema:"title=Description,description=Human readable description of customization" fingerprint:"-"`
 
-	// For customize-build-option, the name of the build option to enable or disable (e.g. "mingw").
-	Option string `toml:"option,omitempty" json:"option,omitempty" jsonschema:"title=Build option,description=For customize-build-option, the name of the build option to enable or disable"`
-	// For customize-remove-subpackage, the name of the sub-package to remove.
-	Package string `toml:"package,omitempty" json:"package,omitempty" jsonschema:"title=Package name,description=For customize-remove-subpackage, the name of the sub-package to remove"`
-	// For customize-build-option and customize-tests, whether the target is enabled. A pointer so
+	// For build-option, the name of the build option to enable or disable (e.g. "mingw").
+	Option string `toml:"option,omitempty" json:"option,omitempty" jsonschema:"title=Build option,description=For build-option, the name of the build option to enable or disable"`
+	// For remove-subpackage, the name of the sub-package to remove.
+	Package string `toml:"package,omitempty" json:"package,omitempty" jsonschema:"title=Package name,description=For remove-subpackage, the name of the sub-package to remove"`
+	// For build-option and tests, whether the target is enabled. A pointer so
 	// that an absent value is distinguishable from an explicit false.
-	Enabled *bool `toml:"enabled,omitempty" json:"enabled,omitempty" jsonschema:"title=Enabled,description=For customize-build-option and customize-tests, whether the target is enabled"`
-	// For customize-build-system, the declarative build system name to onboard to (e.g. "cmake").
-	System string `toml:"system,omitempty" json:"system,omitempty" jsonschema:"title=Build system,description=For customize-build-system, the declarative build system to onboard to (e.g. cmake)"`
-	// For customize-build-system, optional BuildOption(<phase>) arguments.
-	BuildOptions []CustomizationBuildOption `toml:"build-options,omitempty" json:"buildOptions,omitempty" jsonschema:"title=Build options,description=For customize-build-system, optional BuildOption(phase) arguments"`
-	// For customize-build-system, whether to also drop the explicit %check section.
-	DropCheck bool `toml:"drop-check,omitempty" json:"dropCheck,omitempty" jsonschema:"title=Drop check,description=For customize-build-system, whether to also remove the explicit %check section"`
-	// For customize-dependency, the relationship to edit: requires, buildrequires, conflicts, or recommends.
-	Relationship string `toml:"relationship,omitempty" json:"relationship,omitempty" jsonschema:"enum=requires,enum=buildrequires,enum=conflicts,enum=recommends,title=Relationship,description=For customize-dependency, the dependency relationship to edit"`
-	// For customize-dependency, the action to take: add, remove, or set-constraint.
-	Action string `toml:"action,omitempty" json:"action,omitempty" jsonschema:"enum=add,enum=remove,enum=set-constraint,title=Action,description=For customize-dependency, whether to add, remove, or re-constrain the dependency"`
-	// For customize-dependency, the dependency (package or capability) name to match/add.
-	Name string `toml:"name,omitempty" json:"name,omitempty" jsonschema:"title=Dependency name,description=For customize-dependency, the dependency name to match or add"`
-	// For customize-dependency, the version comparison operator (e.g. ">=", "=").
-	Op string `toml:"op,omitempty" json:"op,omitempty" jsonschema:"title=Operator,description=For customize-dependency, the version comparison operator (e.g. >=)"`
-	// For customize-dependency, the version/EVR string for the constraint. Omitting it on
+	Enabled *bool `toml:"enabled,omitempty" json:"enabled,omitempty" jsonschema:"title=Enabled,description=For build-option and tests, whether the target is enabled"`
+	// For build-system, the declarative build system name to onboard to (e.g. "cmake").
+	System string `toml:"system,omitempty" json:"system,omitempty" jsonschema:"title=Build system,description=For build-system, the declarative build system to onboard to (e.g. cmake)"`
+	// For build-system, optional BuildOption(<phase>) arguments.
+	BuildOptions []CustomizationBuildOption `toml:"build-options,omitempty" json:"buildOptions,omitempty" jsonschema:"title=Build options,description=For build-system, optional BuildOption(phase) arguments"`
+	// For build-system, whether to also drop the explicit %check section.
+	DropCheck bool `toml:"drop-check,omitempty" json:"dropCheck,omitempty" jsonschema:"title=Drop check,description=For build-system, whether to also remove the explicit %check section"`
+	// For dependency, the relationship to edit: requires, buildrequires, conflicts, or recommends.
+	Relationship string `toml:"relationship,omitempty" json:"relationship,omitempty" jsonschema:"enum=requires,enum=buildrequires,enum=conflicts,enum=recommends,title=Relationship,description=For dependency, the dependency relationship to edit"`
+	// For dependency, the action to take: add, remove, or set-constraint.
+	Action string `toml:"action,omitempty" json:"action,omitempty" jsonschema:"enum=add,enum=remove,enum=set-constraint,title=Action,description=For dependency, whether to add, remove, or re-constrain the dependency"`
+	// For dependency, the dependency (package or capability) name to match/add.
+	Name string `toml:"name,omitempty" json:"name,omitempty" jsonschema:"title=Dependency name,description=For dependency, the dependency name to match or add"`
+	// For dependency, the version comparison operator (e.g. ">=", "=").
+	Op string `toml:"op,omitempty" json:"op,omitempty" jsonschema:"title=Operator,description=For dependency, the version comparison operator (e.g. >=)"`
+	// For dependency, the version/EVR string for the constraint. Omitting it on
 	// set-constraint keeps the existing version (relax in place).
-	Version string `toml:"version,omitempty" json:"version,omitempty" jsonschema:"title=Version,description=For customize-dependency, the version for the constraint; omit on set-constraint to keep the existing one"`
+	Version string `toml:"version,omitempty" json:"version,omitempty" jsonschema:"title=Version,description=For dependency, the version for the constraint; omit on set-constraint to keep the existing one"`
 }
 
 // Validate checks that required fields are set based on the customization type. This catches
