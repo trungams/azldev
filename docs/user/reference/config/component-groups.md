@@ -63,7 +63,7 @@ The `excluded-paths` patterns filter out spec files in directories that should n
 
 ## Default Component Config
 
-The `default-component-config` field defines configuration that all group members inherit. This uses the same structure as a [component config](components.md), so you can set spec sources, build options, and overlays that apply to every member:
+The `default-component-config` field defines configuration that all group members inherit. This uses the same structure as a [component config](components.md), so you can set spec sources, build options, overlays, and [customizations](customizations.md) that apply to every member:
 
 ```toml
 [component-groups.azure-packages]

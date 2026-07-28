@@ -121,7 +121,7 @@ spec = { type = "upstream", upstream-distro = { name = "fedora", version = "rawh
 
 Here, `bash` inherits the distro-level default spec source (Fedora 43) but overrides it to use `rawhide` instead. All other components that don't specify their own `spec` will use the default Fedora 43 source.
 
-For array fields (like `overlays`), the component's array is **appended** to the inherited array rather than replacing it. This allows distro-level or group-level overlays to apply to all components while individual components add their own.
+For array fields (like `overlays` and `customizations`), the component's array is **appended** to the inherited array rather than replacing it. This allows distro-level or group-level overlays to apply to all components while individual components add their own.
 
 ## Schema Validation
 

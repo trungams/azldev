@@ -67,6 +67,7 @@ azldev comp build -p <name>
 
 - [Components Reference](../reference/config/components.md) — component definition format
 - [Overlays Reference](../reference/config/overlays.md) — modifying upstream specs
+- [Customizations Reference](../reference/config/customizations.md) — declarative build-option/tests/sub-package/build-system/dependency customizations
 - [Component Groups Reference](../reference/config/component-groups.md) — grouping components
 
 <!-- TODO: expand with real-world examples and common patterns -->

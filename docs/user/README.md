@@ -22,6 +22,7 @@
 - [Resources](./reference/config/resources.md) — RPM repos, repo-set templates, and repo sets
 - [Components](./reference/config/components.md) — component definitions, spec sources, build options, and source files
 - [Overlays](./reference/config/overlays.md) — spec and file overlays for modifying upstream sources
+- [Customizations](./reference/config/customizations.md) — declarative, intent-level spec customizations (build options, tests, sub-packages, build systems, dependencies)
 - [Component Groups](./reference/config/component-groups.md) — grouping components with shared defaults
 - [Images](./reference/config/images.md) — image definitions (VMs, containers)
 - [Tools](./reference/config/tools.md) — external tool configuration
