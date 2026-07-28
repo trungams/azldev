@@ -99,6 +99,82 @@ func TestComponentCustomization_Validate(t *testing.T) {
 			errorExpected: true,
 			errorContains: "package",
 		},
+		// customize-dependency tests
+		{
+			name: "customize-dependency valid set-constraint relax",
+			customization: projectconfig.ComponentCustomization{
+				Type:         projectconfig.ComponentCustomizeDependency,
+				Relationship: "buildrequires",
+				Action:       "set-constraint",
+				Name:         "qt6-qtbase-private-devel",
+				Op:           ">=",
+			},
+			errorExpected: false,
+		},
+		{
+			name: "customize-dependency valid add",
+			customization: projectconfig.ComponentCustomization{
+				Type:         projectconfig.ComponentCustomizeDependency,
+				Relationship: "requires",
+				Action:       "add",
+				Name:         "libfoo",
+				Op:           ">=",
+				Version:      "1.0",
+			},
+			errorExpected: false,
+		},
+		{
+			name: "customize-dependency valid remove",
+			customization: projectconfig.ComponentCustomization{
+				Type:         projectconfig.ComponentCustomizeDependency,
+				Relationship: "requires",
+				Action:       "remove",
+				Name:         "libfoo",
+			},
+			errorExpected: false,
+		},
+		{
+			name: "customize-dependency missing relationship",
+			customization: projectconfig.ComponentCustomization{
+				Type:   projectconfig.ComponentCustomizeDependency,
+				Action: "remove",
+				Name:   "libfoo",
+			},
+			errorExpected: true,
+			errorContains: "relationship",
+		},
+		{
+			name: "customize-dependency missing name",
+			customization: projectconfig.ComponentCustomization{
+				Type:         projectconfig.ComponentCustomizeDependency,
+				Relationship: "requires",
+				Action:       "remove",
+			},
+			errorExpected: true,
+			errorContains: "name",
+		},
+		{
+			name: "customize-dependency invalid action",
+			customization: projectconfig.ComponentCustomization{
+				Type:         projectconfig.ComponentCustomizeDependency,
+				Relationship: "requires",
+				Action:       "frobnicate",
+				Name:         "libfoo",
+			},
+			errorExpected: true,
+			errorContains: "invalid action",
+		},
+		{
+			name: "customize-dependency set-constraint without op or version",
+			customization: projectconfig.ComponentCustomization{
+				Type:         projectconfig.ComponentCustomizeDependency,
+				Relationship: "buildrequires",
+				Action:       "set-constraint",
+				Name:         "libfoo",
+			},
+			errorExpected: true,
+			errorContains: "set-constraint",
+		},
 		// unknown type
 		{
 			name: "unknown customization type",

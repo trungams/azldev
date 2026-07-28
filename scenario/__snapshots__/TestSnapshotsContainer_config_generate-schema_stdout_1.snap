@@ -170,7 +170,8 @@
             "customize-build-option",
             "customize-tests",
             "customize-remove-subpackage",
-            "customize-build-system"
+            "customize-build-system",
+            "customize-dependency"
           ],
           "title": "Customization type",
           "description": "The type of customization to apply"
@@ -212,6 +213,42 @@
           "type": "boolean",
           "title": "Drop check",
           "description": "For customize-build-system"
+        },
+        "relationship": {
+          "type": "string",
+          "enum": [
+            "requires",
+            "buildrequires",
+            "conflicts",
+            "recommends"
+          ],
+          "title": "Relationship",
+          "description": "For customize-dependency"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "add",
+            "remove",
+            "set-constraint"
+          ],
+          "title": "Action",
+          "description": "For customize-dependency"
+        },
+        "name": {
+          "type": "string",
+          "title": "Dependency name",
+          "description": "For customize-dependency"
+        },
+        "op": {
+          "type": "string",
+          "title": "Operator",
+          "description": "For customize-dependency"
+        },
+        "version": {
+          "type": "string",
+          "title": "Version",
+          "description": "For customize-dependency"
         }
       },
       "additionalProperties": false,

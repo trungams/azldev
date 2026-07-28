@@ -69,6 +69,13 @@ func TestApplyCustomizations_BuildsArgsAndJSON(t *testing.T) {
 			{Type: projectconfig.ComponentCustomizeBuildOption, Option: "mingw", Enabled: &disabled},
 			{Type: projectconfig.ComponentCustomizeTests, Enabled: &enabled},
 			{Type: projectconfig.ComponentCustomizeRemoveSubpackage, Package: "doc"},
+			{
+				Type:         projectconfig.ComponentCustomizeDependency,
+				Action:       "set-constraint",
+				Relationship: "buildrequires",
+				Name:         "qt6-qtbase-private-devel",
+				Op:           ">=",
+			},
 		},
 	}
 	comp := mockComponent(ctrl, "fltk", config)
@@ -93,7 +100,7 @@ func TestApplyCustomizations_BuildsArgsAndJSON(t *testing.T) {
 		Customizations []map[string]any `json:"customizations"`
 	}
 	require.NoError(t, json.Unmarshal(capturedJSON, &doc))
-	require.Len(t, doc.Customizations, 3)
+	require.Len(t, doc.Customizations, 4)
 
 	assert.Equal(t, map[string]any{
 		"kind":    "build-option",
@@ -108,6 +115,13 @@ func TestApplyCustomizations_BuildsArgsAndJSON(t *testing.T) {
 		"kind":    "remove-subpackage",
 		"package": "doc",
 	}, doc.Customizations[2])
+	assert.Equal(t, map[string]any{
+		"kind":         "dependency",
+		"action":       "set-constraint",
+		"relationship": "buildrequires",
+		"name":         "qt6-qtbase-private-devel",
+		"op":           ">=",
+	}, doc.Customizations[3])
 }
 
 func TestApplyCustomizations_EmptyDoesNotInvokeTool(t *testing.T) {

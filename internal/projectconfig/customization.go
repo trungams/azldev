@@ -19,6 +19,9 @@ const (
 	// ComponentCustomizeBuildSystem onboards the spec to a declarative RPM build system
 	// (rpm >= 4.20) by setting the BuildSystem tag and removing the redundant build phases.
 	ComponentCustomizeBuildSystem ComponentCustomizationType = "customize-build-system"
+	// ComponentCustomizeDependency adds, removes, or re-constrains a dependency relationship
+	// (Requires/BuildRequires/Conflicts/Recommends) on the main package.
+	ComponentCustomizeDependency ComponentCustomizationType = "customize-dependency"
 )
 
 // CustomizationBuildOption is a single BuildOption(<phase>) argument passed to a declarative
@@ -36,7 +39,7 @@ type CustomizationBuildOption struct {
 // toggling a build option, enabling/disabling tests, or removing a sub-package.
 type ComponentCustomization struct {
 	// The type of customization to apply.
-	Type ComponentCustomizationType `toml:"type" json:"type" validate:"required" jsonschema:"enum=customize-build-option,enum=customize-tests,enum=customize-remove-subpackage,enum=customize-build-system,title=Customization type,description=The type of customization to apply"`
+	Type ComponentCustomizationType `toml:"type" json:"type" validate:"required" jsonschema:"enum=customize-build-option,enum=customize-tests,enum=customize-remove-subpackage,enum=customize-build-system,enum=customize-dependency,title=Customization type,description=The type of customization to apply"`
 	// Human readable description of customization; primarily present to document the need for the change.
 	Description string `toml:"description,omitempty" json:"description,omitempty" jsonschema:"title=Description,description=Human readable description of customization" fingerprint:"-"`
 
@@ -53,10 +56,23 @@ type ComponentCustomization struct {
 	BuildOptions []CustomizationBuildOption `toml:"build-options,omitempty" json:"buildOptions,omitempty" jsonschema:"title=Build options,description=For customize-build-system, optional BuildOption(phase) arguments"`
 	// For customize-build-system, whether to also drop the explicit %check section.
 	DropCheck bool `toml:"drop-check,omitempty" json:"dropCheck,omitempty" jsonschema:"title=Drop check,description=For customize-build-system, whether to also remove the explicit %check section"`
+	// For customize-dependency, the relationship to edit: requires, buildrequires, conflicts, or recommends.
+	Relationship string `toml:"relationship,omitempty" json:"relationship,omitempty" jsonschema:"enum=requires,enum=buildrequires,enum=conflicts,enum=recommends,title=Relationship,description=For customize-dependency, the dependency relationship to edit"`
+	// For customize-dependency, the action to take: add, remove, or set-constraint.
+	Action string `toml:"action,omitempty" json:"action,omitempty" jsonschema:"enum=add,enum=remove,enum=set-constraint,title=Action,description=For customize-dependency, whether to add, remove, or re-constrain the dependency"`
+	// For customize-dependency, the dependency (package or capability) name to match/add.
+	Name string `toml:"name,omitempty" json:"name,omitempty" jsonschema:"title=Dependency name,description=For customize-dependency, the dependency name to match or add"`
+	// For customize-dependency, the version comparison operator (e.g. ">=", "=").
+	Op string `toml:"op,omitempty" json:"op,omitempty" jsonschema:"title=Operator,description=For customize-dependency, the version comparison operator (e.g. >=)"`
+	// For customize-dependency, the version/EVR string for the constraint. Omitting it on
+	// set-constraint keeps the existing version (relax in place).
+	Version string `toml:"version,omitempty" json:"version,omitempty" jsonschema:"title=Version,description=For customize-dependency, the version for the constraint; omit on set-constraint to keep the existing one"`
 }
 
 // Validate checks that required fields are set based on the customization type. This catches
 // configuration errors at load time rather than at apply time.
+//
+//nolint:cyclop // complexity is inherent to the number of customization types.
 func (c *ComponentCustomization) Validate() error {
 	desc := c.Description
 	if desc == "" {
@@ -87,6 +103,30 @@ func (c *ComponentCustomization) Validate() error {
 	case ComponentCustomizeBuildSystem:
 		if c.System == "" {
 			return missingField("system")
+		}
+	case ComponentCustomizeDependency:
+		if c.Relationship == "" {
+			return missingField("relationship")
+		}
+
+		if c.Name == "" {
+			return missingField("name")
+		}
+
+		switch c.Action {
+		case "add", "remove", "set-constraint":
+		case "":
+			return missingField("action")
+		default:
+			return fmt.Errorf(
+				"customization type %#q has invalid action %#q (want add/remove/set-constraint): %s",
+				c.Type, c.Action, desc)
+		}
+
+		if c.Action == "set-constraint" && c.Op == "" && c.Version == "" {
+			return fmt.Errorf(
+				"customization type %#q action \"set-constraint\" requires %#q or %#q: %s",
+				c.Type, "op", "version", desc)
 		}
 	default:
 		return fmt.Errorf("unknown customization type %#q: %#q", c.Type, desc)

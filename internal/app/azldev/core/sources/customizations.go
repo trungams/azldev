@@ -108,6 +108,22 @@ func buildCustomizationsDoc(customizations []projectconfig.ComponentCustomizatio
 				"options":    options,
 				"drop_check": customization.DropCheck,
 			})
+		case projectconfig.ComponentCustomizeDependency:
+			entry := map[string]any{
+				"kind":         "dependency",
+				"action":       customization.Action,
+				"relationship": customization.Relationship,
+				"name":         customization.Name,
+			}
+			if customization.Op != "" {
+				entry["op"] = customization.Op
+			}
+
+			if customization.Version != "" {
+				entry["version"] = customization.Version
+			}
+
+			entries = append(entries, entry)
 		default:
 			return nil, fmt.Errorf("unknown customization type %#q", customization.Type)
 		}
