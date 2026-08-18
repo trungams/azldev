@@ -105,6 +105,13 @@ func (p *sourcePreparerImpl) tryBumpStaticRelease(
 	release := component.GetConfig().Release
 	calc := release.Calculation
 
+	// PoC switch: route everything that would use a release counter through
+	// rpmdev-bumpspec instead. See releasebumpspec.go.
+	if bumpspecPoCEnabled() &&
+		(calc == projectconfig.ReleaseCalculationStatic || calc == projectconfig.ReleaseCalculationAuto) {
+		return p.bumpReleaseWithBumpspec(component, sourcesDirPath, commitCount)
+	}
+
 	switch calc {
 	case projectconfig.ReleaseCalculationManual:
 		slog.Debug("Component uses manual release calculation; skipping static release bump",
