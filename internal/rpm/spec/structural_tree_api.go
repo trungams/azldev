@@ -183,6 +183,10 @@ func (t *specTree) RemoveSections(handles []*sectionHandle) error {
 		return err
 	}
 
+	if err := t.hoistReferencedMacros(sections); err != nil {
+		return err
+	}
+
 	removeSections(t.root, sections)
 
 	return nil
