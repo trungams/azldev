@@ -99,6 +99,11 @@ func WithDirtyDetection() PreparerOption {
 	}
 }
 
+// WithSpecEditor selects the [spec.EditorMode] used for source preparation.
+func WithSpecEditor(mode spec.EditorMode) PreparerOption {
+	return func(p *sourcePreparerImpl) { p.specEditor = mode }
+}
+
 // WithSkipLookaside returns a [PreparerOption] that skips all lookaside cache
 // downloads during source preparation. This includes both explicit source file
 // downloads ([SourceManager.FetchFiles]) and lookaside extraction during
@@ -106,10 +111,6 @@ func WithDirtyDetection() PreparerOption {
 // Git-tracked files (spec, patches, scripts, configs) are still fetched from
 // the upstream clone. This is useful for rendering, where only the spec and
 // sidecar files are needed and downloading large source tarballs is unnecessary.
-func WithSpecEditor(mode spec.EditorMode) PreparerOption {
-	return func(p *sourcePreparerImpl) { p.specEditor = mode }
-}
-
 func WithSkipLookaside() PreparerOption {
 	return func(p *sourcePreparerImpl) {
 		p.skipLookaside = true
