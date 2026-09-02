@@ -39,3 +39,27 @@ func Test_ProjectInfo_MergeUpdatesFrom(t *testing.T) {
 	assert.Equal(t, "otherdistro", projectInfo.DefaultDistro.Name)
 	assert.Equal(t, "1.5", projectInfo.DefaultDistro.Version)
 }
+
+func TestProjectInfoSpecEditor(t *testing.T) {
+	t.Run("defaults to legacy", func(t *testing.T) {
+		info := projectconfig.ProjectInfo{}
+		info.ApplyProjectDefaults("/project")
+
+		assert.Equal(t, projectconfig.SpecEditorLegacy, info.SpecEditor)
+	})
+
+	t.Run("accepts supported modes and rejects unknown mode", func(t *testing.T) {
+		for _, mode := range []projectconfig.SpecEditor{
+			projectconfig.SpecEditorLegacy,
+			projectconfig.SpecEditorStructural,
+		} {
+			config := projectconfig.NewProjectConfig()
+			config.Project.SpecEditor = mode
+			require.NoError(t, config.Validate())
+		}
+
+		config := projectconfig.NewProjectConfig()
+		config.Project.SpecEditor = "unknown"
+		assert.ErrorContains(t, config.Validate(), "SpecEditor")
+	})
+}

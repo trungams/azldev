@@ -1066,6 +1066,16 @@
           "description": "Directory for per-component lock files",
           "default": "locks"
         },
+        "spec-editor": {
+          "type": "string",
+          "enum": [
+            "legacy",
+            "structural"
+          ],
+          "title": "Spec editor",
+          "description": "RPM spec editing implementation",
+          "default": "legacy"
+        },
         "default-distro": {
           "$ref": "#/$defs/DistroReference",
           "title": "Default Distro",

@@ -360,6 +360,14 @@ const (
 	DefaultRenderedSpecsDir = "specs"
 )
 
+// SpecEditor selects the RPM spec editing implementation.
+type SpecEditor string
+
+const (
+	SpecEditorLegacy     SpecEditor = "legacy"
+	SpecEditorStructural SpecEditor = "structural"
+)
+
 // Basic information regarding a project.
 type ProjectInfo struct {
 	// Human-readable description of this project.
@@ -377,6 +385,9 @@ type ProjectInfo struct {
 
 	// Path to the directory for per-component lock files.
 	LockDir string `toml:"lock-dir,omitempty" json:"lockDir,omitempty" jsonschema:"title=Lock Directory,description=Directory for per-component lock files,default=locks"`
+
+	// SpecEditor selects the RPM spec editing implementation.
+	SpecEditor SpecEditor `toml:"spec-editor,omitempty" json:"specEditor,omitempty" validate:"omitempty,oneof=legacy structural" jsonschema:"title=Spec editor,description=RPM spec editing implementation,enum=legacy,enum=structural,default=legacy"`
 
 	// Default-selected distro. May be overridden at runtime.
 	DefaultDistro DistroReference `toml:"default-distro,omitempty" json:"defaultDistro,omitempty" jsonschema:"title=Default Distro,description=Default selected distro reference"`
@@ -428,6 +439,10 @@ func (p *ProjectInfo) ApplyProjectDefaults(projectDir string) {
 	setIfEmpty(&p.OutputDir, projectDir, DefaultOutputDir)
 	setIfEmpty(&p.LockDir, projectDir, DefaultLockDir)
 	setIfEmpty(&p.RenderedSpecsDir, projectDir, DefaultRenderedSpecsDir)
+
+	if p.SpecEditor == "" {
+		p.SpecEditor = SpecEditorLegacy
+	}
 }
 
 func setIfEmpty(field *string, projectDir, relPath string) {

@@ -18,6 +18,7 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/opctx"
 	"github.com/microsoft/azure-linux-dev-tools/internal/projectconfig"
 	"github.com/microsoft/azure-linux-dev-tools/internal/providers/sourceproviders"
+	"github.com/microsoft/azure-linux-dev-tools/internal/rpm/spec"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/defers"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileutils"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/localrepo"
@@ -280,7 +281,10 @@ func buildComponent(
 
 	preparerOpts = append(preparerOpts, sources.WithMockProcessor(mockProcessor))
 
-	sourcePreparer, err := sources.NewPreparer(sourceManager, env.FS(), env, env, preparerOpts...)
+	sourcePreparer, err := sources.NewPreparer(sourceManager, env.FS(), env, env, append(
+		preparerOpts,
+		sources.WithSpecEditor(spec.EditorMode(env.Config().Project.SpecEditor)),
+	)...)
 	if err != nil {
 		return ComponentBuildResults{},
 			fmt.Errorf("failed to create source preparer for component %q:\n%w", component.GetName(), err)

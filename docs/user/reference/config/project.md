@@ -13,6 +13,7 @@ The following fields are nested under the `[project]` TOML section:
 | Work directory | `work-dir` | string | No | Path to the temporary working directory for build artifacts (relative to this config file) |
 | Output directory | `output-dir` | string | No | Path to the directory where final build outputs (RPMs, SRPMs) are placed (relative to this config file) |
 | Rendered specs directory | `rendered-specs-dir` | string | No | Output directory for `component render` (relative to this config file) |
+| Spec editor | `spec-editor` | `legacy` or `structural` | No | RPM spec editor; defaults to `legacy` |
 | Default distro | `default-distro` | [DistroReference](distros.md#distro-references) | No | The default distro and version to use when building components |
 
 > **Note:** `[default-component-config]`, `[default-package-config]`, and `[package-groups]` are **top-level** TOML sections — they are not nested under `[project]`. They are documented in the sections below.
@@ -27,6 +28,15 @@ The `log-dir`, `work-dir`, `output-dir`, and `rendered-specs-dir` paths are reso
 - **`rendered-specs-dir`** — rendered spec and sidecar files are written here by `azldev component render`. Components are organized into letter-prefixed subdirectories (e.g., `SPECS/c/curl`, `SPECS/v/vim`)
 
 > **Note:** Do not edit files under these directories manually — they are managed by azldev and may be overwritten or cleaned at any time.
+
+## Spec Editor
+
+`spec-editor` selects the RPM spec editing implementation for every operation in a project. Omit it to use the compatible `legacy` line-oriented editor. Set it to `structural` to use the lossless structural editor; each opened spec uses the selected implementation without fallback.
+
+```toml
+[project]
+spec-editor = "structural"
+```
 
 ## Default Distro
 

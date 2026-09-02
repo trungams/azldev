@@ -19,6 +19,7 @@ import (
 	"github.com/microsoft/azure-linux-dev-tools/internal/app/azldev/core/sources"
 	"github.com/microsoft/azure-linux-dev-tools/internal/global/opctx"
 	"github.com/microsoft/azure-linux-dev-tools/internal/providers/sourceproviders"
+	"github.com/microsoft/azure-linux-dev-tools/internal/rpm/spec"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/dirdiff"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileperms"
 	"github.com/microsoft/azure-linux-dev-tools/internal/utils/fileutils"
@@ -531,7 +532,10 @@ func prepareComponentSources(
 		sources.WithMockProcessor(mockProcessor),
 	}
 
-	preparer, err := sources.NewPreparer(sourceManager, env.FS(), env, env, preparerOpts...)
+	preparer, err := sources.NewPreparer(sourceManager, env.FS(), env, env, append(
+		preparerOpts,
+		sources.WithSpecEditor(spec.EditorMode(env.Config().Project.SpecEditor)),
+	)...)
 	if err != nil {
 		return nil, fmt.Errorf("creating source preparer for %#q:\n%w", componentName, err)
 	}

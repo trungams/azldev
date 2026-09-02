@@ -5,6 +5,7 @@ work-dir = '/workdir/build/work'
 output-dir = '/workdir/out'
 rendered-specs-dir = '/workdir/specs'
 lock-dir = '/workdir/locks'
+spec-editor = 'legacy'
 
 [component-groups]
 [component-groups.default]
