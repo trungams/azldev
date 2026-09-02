@@ -72,12 +72,112 @@ func TestParseTreeRejectsMalformedInput(t *testing.T) {
 		{name: "unterminated conditional", input: "%if 1\n%build"},
 		{name: "unterminated macro continuation", input: "%global flags \\\nbody \\"},
 		{name: "unterminated lua macro", input: "%global helper %{lua:\nlocal value = {}\n%build"},
+		{name: "else outside conditional", input: "%else"},
+		{name: "elif outside conditional", input: "%elif 0"},
+		{name: "elifarch outside conditional", input: "%elifarch x86_64"},
+		{name: "elifnarch outside conditional", input: "%elifnarch x86_64"},
+		{name: "elifos outside conditional", input: "%elifos linux"},
+		{name: "elifnos outside conditional", input: "%elifnos linux"},
+		{name: "duplicate else", input: "%if 1\n%else\n%else\n%endif"},
+		{name: "elif after else", input: "%if 1\n%else\n%elif 0\n%endif"},
+		{name: "elifarch after else", input: "%if 1\n%else\n%elifarch x86_64\n%endif"},
+		{name: "elifnarch after else", input: "%if 1\n%else\n%elifnarch x86_64\n%endif"},
+		{name: "elifos after else", input: "%if 1\n%else\n%elifos linux\n%endif"},
+		{name: "elifnos after else", input: "%if 1\n%else\n%elifnos linux\n%endif"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := parseTree(splitLines(tt.input))
 			require.Error(t, err)
+		})
+	}
+}
+
+func TestParseTreeAcceptsElifChainBeforeElse(t *testing.T) {
+	lines := []string{
+		"%if 1",
+		"then",
+		"%elif 0",
+		"elif",
+		"%elifarch x86_64",
+		"elifarch",
+		"%elifnarch aarch64",
+		"elifnarch",
+		"%elifos linux",
+		"elifos",
+		"%elifnos linux",
+		"elifnos",
+		"%else",
+		"else",
+		"%endif",
+	}
+
+	tree, err := parseTree(lines)
+
+	require.NoError(t, err)
+	assert.Equal(t, lines, serializeTree(tree))
+}
+
+func TestParseTreeAcceptsNestedConditionalBranches(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+	}{
+		{
+			name: "outer elif after completed inner else",
+			lines: []string{
+				"%if 1",
+				"%if 0",
+				"%else",
+				"%endif",
+				"%elif 0",
+				"%endif",
+			},
+		},
+		{
+			name: "nested elif inside outer else",
+			lines: []string{
+				"%if 1",
+				"%else",
+				"%if 0",
+				"%elif 1",
+				"%endif",
+				"%endif",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tree, err := parseTree(tt.lines)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.lines, serializeTree(tree))
+		})
+	}
+}
+
+func TestParseTreeKeepsBranchLinesOpaqueInMultilineMacroBodies(t *testing.T) {
+	for _, macroHeader := range []string{"%define helper \\", "%global helper \\"} {
+		t.Run(macroHeader, func(t *testing.T) {
+			lines := []string{
+				macroHeader,
+				"%else \\",
+				"%elif 0 \\",
+				"%elifarch x86_64 \\",
+				"%elifnarch aarch64 \\",
+				"%elifos linux \\",
+				"%elifnos linux \\",
+				"body",
+				"%build",
+				"echo %{helper}",
+			}
+
+			tree, err := parseTree(lines)
+
+			require.NoError(t, err)
+			assert.Equal(t, lines, serializeTree(tree))
 		})
 	}
 }
