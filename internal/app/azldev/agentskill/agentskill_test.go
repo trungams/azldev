@@ -119,6 +119,15 @@ func TestUpdateComponentSkillStagesRenderedOutputBeforeAmend(t *testing.T) {
 		"both amend workflows must stage the post-commit render")
 }
 
+func TestComponentSkillDocumentsRPMDevBumpspecReleaseHandling(t *testing.T) {
+	doc, err := agentskill.SkillDocument("azldev-comp-toml", testParams())
+	require.NoError(t, err)
+
+	assert.Contains(t, doc, "rpmdevtools` 9.6")
+	assert.Contains(t, doc, "fingerprint-derived synthetic change")
+	assert.Contains(t, doc, "only when host RPM evaluation proves the")
+}
+
 func TestImageSkillDocumentsRuntimeConfigOverride(t *testing.T) {
 	doc, err := agentskill.SkillDocument("azldev-image", testParams())
 	require.NoError(t, err)

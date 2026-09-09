@@ -112,9 +112,9 @@ The `[components.<name>.release]` section controls how azldev manages the Releas
 
 | Mode | Behavior |
 |------|----------|
-| `auto` | Auto-detects from the spec's Release tag value. If `%autorelease` is found, rpmautospec handles it. If a static integer is found, optionally followed by `%{?dist}` or `%{dist}`, it is bumped by the synthetic commit count. |
+| `auto` | Auto-detects `%autorelease` and leaves it to rpmautospec. All other Release forms are bumped by `rpmdev-bumpspec`, once for each fingerprint-derived synthetic change. |
 | `autorelease` | Explicitly declares the spec uses `%autorelease`. Skips all Release manipulation. Use this for specs with conditional `%autorelease`/`%else` fallbacks that confuse auto-detection. |
-| `static` | Explicitly declares the spec uses a static integer release. Bumps it by the synthetic commit count only when the Release tag is an integer, optionally followed by `%{?dist}` or `%{dist}`. Non-integer or other non-standard Release values (for example, `%{pkg_release}`) require `manual` or an overlay. |
+| `static` | Requires a non-`%autorelease` Release and invokes `rpmdev-bumpspec` once for each fingerprint-derived synthetic change. rpmdev-bumpspec natively attempts integer, dotted, macro, conditional, and fallback forms; azldev accepts the operation only when host RPM evaluation proves the source Release is strictly newer. Inactive conditional definitions or otherwise ineffective mutations fail and restore the original spec. |
 | `manual` | Skips all automatic Release manipulation. Use for components that manage their own release numbering (e.g. kernel). |
 
 Most components use `auto` (the default) and need no release configuration. Examples:
@@ -128,6 +128,33 @@ calculation = "autorelease"
 [components.kernel.release]
 calculation = "manual"
 ```
+
+### Host requirement and troubleshooting
+
+Automatic non-`%autorelease` release handling requires `rpmdev-bumpspec`,
+`rpmdev-packager`, `rpm`, `rpmspec`, and `python3` with the RPM Python module. The
+tested implementation is `rpmdevtools` 9.6 (`rpmdev-bumpspec` 1.0.13), but azldev
+accepts a behaviorally compatible newer implementation: it evaluates exactly the
+source package EVR with `rpmspec --srpm` before and after every bump and verifies that
+RPM orders the new Release strictly higher. azldev converts `build.with` and
+`build.without` to their effective `_with_<name>` and `_without_<name>` macro
+definitions, then applies explicit defines and undefines with the same precedence as
+the build. A component build also passes `target_arch` from `--mock-config-opt` to
+both evaluations and the wrapped RPM command; render and `prepare-sources` use the
+host RPM target when no target is otherwise available. azldev uses normal host vendor
+macros, an isolated HOME, and fixed locale/timezone. If render, build, or
+`prepare-sources` (which creates dist-git by default; `--without-git` opts out)
+reports a missing or incompatible tool, provision the host runtime rather than adding
+a Release overlay.
+
+This is a transitional mutation engine: locks and synthetic history still determine
+the ordered fingerprint changes, and azldev invokes `rpmdev-bumpspec` once per
+change. Each invocation uses the fixed Azure Linux Packaging Team identity, `- rebuilt`
+comment, and `Mon Jan 06 2025` datestamp, so fingerprint author/message/time data do
+not affect generated release or changelog bytes. The tool may update both `Release:`
+(or its preferred release macro) and `%changelog`; `%autorelease` remains unchanged.
+This does not introduce lock-free release calculation or redesign final changelog
+ordering.
 
 ## Render Configuration
 

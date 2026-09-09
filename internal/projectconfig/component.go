@@ -280,7 +280,7 @@ type ReleaseCalculation string
 
 const (
 	// ReleaseCalculationAuto is the default. azldev auto-detects whether the spec uses
-	// %autorelease or a static integer release, and handles each accordingly.
+	// %autorelease or another Release form and handles each accordingly.
 	ReleaseCalculationAuto ReleaseCalculation = "auto"
 
 	// ReleaseCalculationAutorelease explicitly declares that the spec uses %autorelease.
@@ -289,10 +289,9 @@ const (
 	// fallbacks that confuse auto-detection.
 	ReleaseCalculationAutorelease ReleaseCalculation = "autorelease"
 
-	// ReleaseCalculationStatic explicitly declares that the spec uses a static
-	// release tag. azldev parses and bumps the release value during rendering.
-	// Use this for specs with conditional Release tags where auto-detection
-	// picks the wrong branch but the static release logic still works correctly.
+	// ReleaseCalculationStatic explicitly declares that the spec uses a non-%autorelease
+	// release tag. azldev invokes rpmdev-bumpspec and accepts a mutation only when host
+	// RPM evaluation proves the source Release is strictly newer.
 	ReleaseCalculationStatic ReleaseCalculation = "static"
 
 	// ReleaseCalculationManual skips all automatic Release tag manipulation. Use this for

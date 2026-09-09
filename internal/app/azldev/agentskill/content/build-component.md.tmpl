@@ -43,8 +43,12 @@ Finalize with `azldev comp update -p <name>` before opening a PR (see the
 
 ## Debugging build failures
 
-1. **Render error mentioning a non-standard `Release` tag** — a release-calculation
-   issue; see the `azldev-comp-toml` skill.
+1. **Render error mentioning `rpmdev-bumpspec` or RPM macros** — provision
+   `rpmdev-bumpspec`, `rpmdev-packager`, `rpm`, `rpmspec`, and `python3-rpm`.
+   rpmdevtools 9.6 (`rpmdev-bumpspec` 1.0.13) is tested; behaviorally compatible
+   newer tools are accepted. azldev evaluates one source EVR with `rpmspec --srpm`
+   and verifies RPM ordering, using effective bcond macro definitions and the build
+   target when one is configured; see the `azldev-comp-toml` skill.
 2. **Overlay did not apply as expected** — `azldev comp diff-sources -p <name>` shows
    what the overlays actually change.
 3. **Inspect the build environment** — `azldev comp build -p <name> --preserve-buildenv

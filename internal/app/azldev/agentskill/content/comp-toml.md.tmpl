@@ -68,14 +68,17 @@ without = ["plugin_rhsm"]       # disable %bcond_with conditionals
 
 `release.calculation` controls the `Release:` tag. There are four modes:
 
-- `auto` (default) — auto-detect whether the spec uses `%autorelease` or a static
-  release and handle it accordingly. Correct for most packages.
+- `auto` (default) — leave `%autorelease` unchanged; otherwise invoke
+  `rpmdev-bumpspec` once for each fingerprint-derived synthetic change.
 - `autorelease` — force `%autorelease` handling (use when auto-detection misreads a
   spec that wraps `%autorelease` in a conditional).
-- `static` — force static-integer handling and bump the integer on render (the
-  inverse of `autorelease`).
+- `static` — require a non-`%autorelease` release and invoke `rpmdev-bumpspec`.
+  It natively attempts integer, dotted, macro, conditional, and fallback Release
+  forms, but azldev accepts an operation only when host RPM evaluation proves the
+  source Release is strictly newer. Inactive conditional definitions or otherwise
+  ineffective mutations fail and restore the original spec.
 - `manual` — you own the `Release:` value. Use this only when render fails with a
-  "non-standard Release tag" error. **A `manual` component is not bumped by the
+  automatic Release tool. **A `manual` component is not bumped by the
   render/commit/amend cycle, so increment its release yourself in the same change**
   (see the `azldev-update-component` skill).
 
@@ -83,6 +86,19 @@ without = ["plugin_rhsm"]       # disable %bcond_with conditionals
 [components.mypackage.release]
 calculation = "manual"
 ```
+
+Non-`%autorelease` rendering requires `rpmdev-bumpspec`, `rpmdev-packager`, `rpm`,
+`rpmspec`, and `python3` with its RPM module. `rpmdevtools` 9.6 /
+`rpmdev-bumpspec` 1.0.13 is the tested implementation; newer behaviorally compatible
+tools are accepted only when `rpmspec --srpm` evaluates source
+Name/Epoch/Version/Release before and after the operation and RPM orders the Release
+strictly higher. Build bconds are evaluated as effective `_with_<name>` and
+`_without_<name>` macro definitions, with explicit defines and undefines retaining
+their usual precedence. A build's `--mock-config-opt target_arch=...` is also passed
+to both evaluations and the wrapped RPM command. azldev uses normal host vendor macros
+and fixed team identity/comment/datestamp inputs, so fingerprint metadata does not
+alter the generated release or changelog bytes. Locks and synthetic history still
+determine the number and order of bumps.
 
 ## Render configuration
 
