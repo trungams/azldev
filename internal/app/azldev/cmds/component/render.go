@@ -525,6 +525,7 @@ func prepareComponentSources(
 	// sidecar files are needed for rendering.
 	preparerOpts := []sources.PreparerOption{
 		sources.WithGitRepo(env, env.LockReader(), distro.Version.ReleaseVer),
+		sources.WithRPMDevBumpspec(env, env.WorkDir(), ""),
 		sources.WithDirtyDetection(),
 		sources.WithSkipLookaside(),
 		sources.WithUpstreamProvenance(sources.FedoraDistTag(distro.Ref.Name, distro.Version.ReleaseVer)),

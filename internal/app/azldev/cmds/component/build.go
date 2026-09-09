@@ -271,6 +271,7 @@ func buildComponent(
 	if !options.WithoutGitRepo {
 		preparerOpts = append(preparerOpts,
 			sources.WithGitRepo(env, env.LockReader(), distro.Version.ReleaseVer),
+			sources.WithRPMDevBumpspec(env, env.WorkDir(), options.MockConfigOpts["target_arch"]),
 			sources.WithDirtyDetection(),
 		)
 	}

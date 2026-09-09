@@ -130,6 +130,12 @@ func PrepareComponentSources(env *azldev.Env, options *PrepareSourcesOptions) er
 			"synthetic history requires overlays to be applied")
 	}
 
+	if !options.WithoutGitRepo && !options.SkipOverlays {
+		if err := fileutils.MkdirAll(env.FS(), env.WorkDir()); err != nil {
+			return fmt.Errorf("failed to create work directory %#q:\n%w", env.WorkDir(), err)
+		}
+	}
+
 	preparerOpts := buildPreparerOptions(env, distro, options)
 
 	preparer, err := sources.NewPreparer(sourceManager, env.FS(), env, env, preparerOpts...)
@@ -157,6 +163,7 @@ func buildPreparerOptions(
 	if !options.WithoutGitRepo && !options.SkipOverlays {
 		opts = append(opts,
 			sources.WithGitRepo(env, env.LockReader(), distro.Version.ReleaseVer),
+			sources.WithRPMDevBumpspec(env, env.WorkDir(), ""),
 			sources.WithDirtyDetection(),
 		)
 	}
